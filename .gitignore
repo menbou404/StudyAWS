@@ -1,0 +1,19 @@
+# OS / editor
+.DS_Store
+.vscode/
+.idea/
+
+# Secrets（絶対にコミットしない）
+.env
+.env.*
+!.env.example
+*.pem
+
+# Python
+__pycache__/
+.venv/
+*.pyc
+
+# Node / CDK
+node_modules/
+cdk.out/
