@@ -20,3 +20,6 @@ cdk.out/
 
 # 個人の学習ログ（GitHub に上げない）
 docs/log/
+
+# ローカル開発用の SQLite
+*.db

@@ -1,0 +1,55 @@
+<!doctype html>
+<html lang="ja">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta http-equiv="refresh" content="30">
+  <title>StatusPage</title>
+  <style>
+    body { font-family: system-ui, sans-serif; max-width: 960px; margin: 2rem auto; padding: 0 1rem; color: #222; }
+    h1 { font-size: 1.5rem; }
+    table { width: 100%; border-collapse: collapse; }
+    th, td { text-align: left; padding: .5rem; border-bottom: 1px solid #ddd; }
+    .badge { display: inline-block; padding: .1rem .5rem; border-radius: 4px; font-weight: bold; color: #fff; }
+    .up { background: #1a7f37; }
+    .down { background: #cf222e; }
+    .unknown { background: #888; }
+    .muted { color: #777; font-size: .9rem; }
+    .error { color: #cf222e; font-size: .85rem; }
+  </style>
+</head>
+<body>
+  <h1>StatusPage</h1>
+  <p class="muted">30秒ごとに自動更新。監視対象の追加・削除は <a href="/docs">/docs</a> から。</p>
+
+  {% if targets %}
+  <table>
+    <thead>
+      <tr><th>状態</th><th>名前</th><th>URL</th><th>応答</th><th>最終チェック (UTC)</th></tr>
+    </thead>
+    <tbody>
+      {% for t in targets %}
+      <tr>
+        <td>
+          {% if t.latest is none %}<span class="badge unknown">未チェック</span>
+          {% elif t.latest.ok %}<span class="badge up">UP</span>
+          {% else %}<span class="badge down">DOWN</span>{% endif %}
+        </td>
+        <td>{{ t.name }}</td>
+        <td><a href="{{ t.url }}">{{ t.url }}</a></td>
+        <td>
+          {% if t.latest %}
+            {{ t.latest.status_code or "-" }}{% if t.latest.response_ms is not none %} / {{ t.latest.response_ms }}ms{% endif %}
+            {% if t.latest.error %}<div class="error">{{ t.latest.error }}</div>{% endif %}
+          {% else %}-{% endif %}
+        </td>
+        <td class="muted">{{ t.latest.checked_at.strftime("%Y-%m-%d %H:%M:%S") if t.latest else "-" }}</td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+  {% else %}
+  <p>監視対象がまだありません。<a href="/docs">/docs</a> の <code>POST /api/targets</code> から追加してください。</p>
+  {% endif %}
+</body>
+</html>
