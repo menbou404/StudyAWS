@@ -10,9 +10,9 @@
 
 | Phase | 内容 | 学べること | 状態 |
 |---|---|---|---|
-| 0. 準備 | アカウントの安全設定、請求アラート、AWS CLI | IAM, MFA, Budgets, IAM Identity Center | 🚧 |
+| 0. 準備 | アカウントの安全設定、請求アラート、AWS CLI | Builder ID, MFA, IAM（ロールとポリシーの基本）, Budgets, AWS CLI (`aws login`) | ✅ |
 | 1. アプリ作成 | FastAPI で API + 監視ジョブ、Docker Compose で実行 | Docker | |
-| 2. EC2に手で載せる | nginx + systemd で常駐 | VPC, サブネット, セキュリティグループ, Session Manager | |
+| 2. EC2に手で載せる | nginx + systemd で常駐 | VPC, サブネット, セキュリティグループ, IAM ロール, Session Manager | |
 | 3. DBを分離 | RDS (PostgreSQL) をプライベートサブネットへ | パブリック/プライベート設計 | |
 | 4. 冗長化 | ALB + Auto Scaling, 独自ドメイン + HTTPS | ロードバランサー, マルチAZ, Route 53, ACM | |
 | 5. コード化 | ここまでの構成を AWS CDK (TypeScript) で再現 | IaC | |
@@ -21,12 +21,29 @@
 | 8. サーバーレス化 | Lambda + EventBridge, S3 + CloudFront | サーバーレス, コスト比較 | |
 | 9. 運用・監視 | ログ・メトリクス・アラーム | CloudWatch | |
 
-- 手順書: `docs/phaseN-*.md`
-- 学習ログ（日記）: [docs/log/](docs/log/)
+## ドキュメント
+
+| ファイル | 内容 |
+|---|---|
+| `docs/phaseN-setup.md` | 手順書：AWS や手元で行う操作の手順と、その大まかな解説 |
+| `docs/phaseN-study.md` | 知識まとめ：その Phase で使う AWS の知識を体系的にまとめたもの |
+| `docs/phaseN-appendix.md` | 付録：その Phase では使っていないが、知っておくとよいもの（ない Phase もある） |
+| `docs/log/` | 個人の学習ログ（Git 管理外） |
+
+Phase 0: [手順書](docs/phase0-setup.md) / [知識まとめ](docs/phase0-study.md) / [付録](docs/phase0-appendix.md)
+
+## 環境
+
+- アカウント：新方式（Sign up for AWS (new)）・無料プラン
+- リージョン：`ap-southeast-2`（シドニー）に固定
+- CLI：`aws login --profile study`
 
 ## ルール
 
 - 初めてのサービスは「コンソールで手作業 → CDK でコード化」の2段階で進める
 - 使い終わったリソースは必ず削除する（RDS, ALB, NAT Gateway は放置すると課金される）
-- アクセスキー（長期の認証情報）は作らない。CLI は IAM Identity Center (SSO) でログインする
-- アカウントID・URL・鍵などはリポジトリに書かない（[docs/log/README.md](docs/log/README.md) 参照）
+- アクセスキー（長期の認証情報）は作らない。CLI は `aws login` の一時的な認証情報でログインする
+- リポジトリに書かないもの：
+  - AWS アカウントID、メールアドレス
+  - アクセスキー、パスワード、`.pem` などの鍵
+  - IPアドレスやリソースID（`i-0abc...` など）は伏せ字にする（`i-xxxx`）

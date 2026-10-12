@@ -1,130 +1,162 @@
-# Phase 0: AWSアカウントの準備
+# Phase 0 手順書: AWSアカウントの準備
+
+> **新方式（Sign up for AWS (new)、2026年9月〜）** のアカウント向けの手順。
+> 仕組みの解説は [phase0-study.md](phase0-study.md)、従来方式の手順は [phase0-appendix.md](phase0-appendix.md)。
 
 ## ゴール
 
-- 事故（不正利用・高額請求）が起きにくいアカウントにする
-- 普段使い用のユーザーで、ターミナルから `aws` コマンドを使えるようにする
+- 事故（不正利用・高額請求）が起きにくい状態にする
+- ターミナルから `aws` コマンドを使えるようにする
 
-## 全体像
+## 環境
 
-```
-rootユーザー（メールアドレスでログイン）
-  └─ 最強の権限。請求・アカウント解約まで何でもできる
-     → MFA をつけて金庫にしまう。普段は使わない
-
-IAM Identity Center のユーザー（普段使い）
-  └─ 「AdministratorAccess」の権限セットを割り当てる
-     → コンソールも CLI もこのユーザーで使う
-     → CLI は一時的な認証情報で動くので、キーが漏れる心配が少ない
-```
-
-**なぜ root を使わないのか：** root は権限を制限できない唯一のユーザー。乗っ取られるとアカウントごと失う。
-**なぜアクセスキーを作らないのか：** アクセスキーは期限のない合鍵。GitHub に誤って push してしまい、数時間で仮想通貨マイニングに使われて高額請求、という事故が実際によく起きている。
+| 項目 | 値 |
+|---|---|
+| アカウント | 新方式・無料プラン（$100 クレジット、2027-04-11 頃まで） |
+| ログイン | Google → AWS Builder ID（MFA あり） |
+| リージョン | `ap-southeast-2`（シドニー）固定 |
+| CLI プロファイル | `study` |
 
 ---
 
-## チェックリスト
+## 0. AWS アカウントを作る
 
-### 0. AWS アカウントを作る
+1. https://aws.amazon.com/ →「アカウントを作成」
+2. 「Google で続行」などを選び、既存のログインで認証する
+3. 名前を入力 → メールに届いた確認コードを入力 → パスワードと連絡先を入力
+4. 最初のプロジェクトが自動で作られ、コンソールが開く（名前は自動。例：Idea Launchpad）
 
-1. https://aws.amazon.com/ →「無料アカウントを作成」
-2. メールアドレス（= root ユーザー）とアカウント名を入力 → 届いた確認コードを入力
-3. root ユーザーのパスワードを設定（長くランダムに。パスワードマネージャー推奨）
-4. 連絡先情報：「個人」を選び、住所などを**英語表記**で入力
-5. クレジットカードを登録（無料プランでも必須。本人確認用に少額の仮請求が出ることがある）
-6. 電話番号の SMS / 音声で本人確認
-7. **プランを選ぶ：「無料プラン」**（クレジットの範囲内でしか使えないので、意図せぬ請求が起きない）
-8. サポートプラン：「ベーシック（無料）」
+- [x] 完了
 
-メールアドレスは **長く使い続けられるもの** にする。卒業などで使えなくなるアドレスだと、root のパスワード再設定ができなくなる。
+## 1. 入り口を守る（MFA）
 
-> 無料プランはクレジットを使い切るか、一定期間（作成から6か月）が過ぎると、有料プランへアップグレードしない限り使えなくなる。
-> 無料プランでは一部のサービスが使えない場合があるので、必要になったらアップグレードを検討する。条件は作成時の画面で必ず確認。
+> 解説：[study §2 アカウントを守る](phase0-study.md#2-アカウントを守る)
 
-- [ ] 完了
+1. **Google アカウントの2段階認証** を有効にする
+2. **Builder ID に MFA を登録する**
+   - https://settings.aws.com →「Manage security and sign-in」→ Builder ID の「Security」→「Register device」
+   - 認証アプリ（QR コードを読み取り、6桁のコードを入力）またはパスキー / セキュリティキー
+3. サインアウト → もう一度ログインして、MFA を求められることを確認する
 
-### 1. root ユーザーに MFA を設定する
+- [x] Google の2段階認証
+- [x] Builder ID に MFA を登録
+- [ ] 予備の MFA を登録（Windows Hello の PIN、または Google 以外にバックアップした認証アプリ）
 
-1. root ユーザーでコンソールにログイン
-2. 右上のアカウント名 →「セキュリティ認証情報」
-3. 「MFA を割り当てる」→ 認証アプリ（Google Authenticator、1Password など）またはパスキーを登録
+## 2. アカウントの状態を確認する
 
-- [ ] 完了
+https://settings.aws.com →「Project」→「Overview」→「Additional Info」
 
-### 2. 請求情報を IAM ユーザーからも見られるようにする
+- **リージョン**：`ap-southeast-2` になっているか
+- **アカウントID**：12桁の数字（リポジトリには書かない）
 
-root のまま、右上のアカウント名 →「アカウント」→「IAM ユーザーおよびロールによる請求情報へのアクセス」を **有効化**。
-（これをしないと、普段使いユーザーで請求画面が見られない）
+- [x] 完了
 
-- [ ] 完了
+## 3. プランとクレジットを確認する
 
-### 3. 予算アラートを作る（Budgets）
+> 解説：[study §6 お金の管理](phase0-study.md#6-お金の管理)
 
-1. コンソールで「Billing and Cost Management」→「予算 (Budgets)」→「予算を作成」
-2. テンプレートで **「ゼロ支出予算」** を作成 → 1セントでも課金されたらメールが届く
-3. もう1つ **「月次コスト予算」** を作成（例：$10）→ 想定以上の課金に気づける
+AWS Settings の請求（Billing）画面で次の3つを確認する。
 
-あわせて「請求設定 (Billing preferences)」で **無料利用枠の使用アラート** を有効化しておく。
+- 今のプラン（無料 / 有料）
+- クレジット残高
+- 残り日数
 
-- [ ] ゼロ支出予算
-- [ ] 月次コスト予算
-- [ ] 無料利用枠アラート
+- [x] 完了（2026-10-12：無料プラン、残り181日、残高 $100.00）
 
-> 💡 2025年7月以降に作成したアカウントは、無料利用枠がクレジット制（無料プラン/有料プラン）になっている。
-> 「Billing and Cost Management」のホームで、自分がどちらのプランか・クレジット残高を確認しておく。
+## 4. 予算アラートを作る（Budgets）
 
-### 4. IAM Identity Center で普段使いユーザーを作る
+> 解説：[study §6 お金の管理](phase0-study.md#6-お金の管理)
 
-1. **リージョンを「アジアパシフィック (東京) ap-northeast-1」にしてから** IAM Identity Center を開き「有効にする」
-   （Identity Center は有効化したリージョンに固定されるので最初に注意）
-2. 「ユーザー」→ ユーザーを追加（自分用。メールで招待が届くのでパスワードと MFA を設定）
-3. 「許可セット」→ 事前定義済み →「AdministratorAccess」で作成
-4. 「AWS アカウント」→ 自分のアカウントを選択 →「ユーザーまたはグループを割り当て」→ 作ったユーザー + AdministratorAccess
-5. 「設定」→ **AWS アクセスポータルの URL**（`https://d-xxxxxxxxxx.awsapps.com/start`）をメモ
+1. コンソール上部の検索バーで「Budgets」と入力 →「予算を作成」
+2. 「テンプレートを使用（シンプル）」→ **「月次コスト予算」**
+3. 予算名（例：`monthly-10usd`）、予算額 `10`（USD）、通知先のメールアドレスを入力する
+4. テンプレートが自動で設定するしきい値：予測 > 100%、実績 > 85%、実績 > 100%
 
-- [ ] 完了（アクセスポータル URL を控えた）
+「ゼロ支出予算」は作らない（クレジット制では、少し使っただけで毎回通知が来てしまう）。
 
-### 5. AWS CLI を SSO でログインできるようにする
+- [x] 完了（月次コスト予算 $10）
+- [ ] Phase 2 で EC2 を動かしたあと、Budgets の実績が $0 より大きくなるか確認する
 
-ターミナルで：
+## 5. AWS CLI を使えるようにする
 
-```bash
-aws configure sso
+> 解説：[study §5 認証情報](phase0-study.md#5-認証情報アクセスキーと一時的な認証情報)
+
+### 5-1. インストール（Windows）
+
+```powershell
+winget install Amazon.AWSCLI
 ```
 
-聞かれる項目：
+ターミナルを開き直して確認：
 
-| 項目 | 入力 |
-|---|---|
-| SSO session name | `study`（任意の名前） |
-| SSO start URL | 手順4でメモしたアクセスポータル URL |
-| SSO region | `ap-northeast-1` |
-| SSO registration scopes | そのまま Enter |
-| （ブラウザが開くので許可） | |
-| CLI default client Region | `ap-northeast-1` |
-| CLI default output format | `json` |
-| Profile name | `study` |
+```powershell
+aws --version
+```
 
-動作確認：
+`aws-cli/2.x.x` と表示されれば OK（2.37.12 で動作確認済み）。`aws login` は新しいコマンドなので、古い CLI の場合は更新する。
 
-```bash
+### 5-2. ログイン
+
+```powershell
+aws login --profile study --region ap-southeast-2
+```
+
+1. ブラウザが開く → Google → MFA でログイン
+2. 「Choose AWS sessions」でプロジェクトを選ぶ
+3. `Configure AWS skills and the AWS MCP server for your AI coding agent(s)? [y/n/never]` と出たら `n`
+   （AI エージェントに AWS を直接操作させる設定。仕組みを理解するまで入れない。あとから AWS Settings でも設定できる）
+
+`--region` はそのコマンドだけに効く。プロファイルの既定リージョンとして保存する：
+
+```powershell
+aws configure set region ap-southeast-2 --profile study
+Get-Content $HOME\.aws\config
+```
+
+`[profile study]` の下に `login_session` と `region = ap-southeast-2` があれば OK。
+
+### 5-3. 動作確認
+
+```powershell
 aws sts get-caller-identity --profile study
 ```
 
-自分のアカウントIDと `AWSReservedSSO_AdministratorAccess_...` が表示されれば成功。
-
-翌日以降、セッションが切れたら：
-
-```bash
-aws sso login --profile study
+```json
+{
+    "UserId": "AROAxxxxxxxxxxxxxxxxx:<セッション名>",
+    "Account": "xxxxxxxxxxxx",
+    "Arn": "arn:aws:sts::xxxxxxxxxxxx:assumed-role/AccountFullAccessRole/<セッション名>"
+}
 ```
 
-- [ ] 完了
+`assumed-role/AccountFullAccessRole` と表示されれば成功。読み方は [study §4](phase0-study.md#4-iam)。
 
----
+### 5-4. ログインが切れたら
 
-## 理解度チェック（SAA にも出る）
+`Your session has expired` と出たら、もう一度ログインする。
 
-- root ユーザーでしかできない操作の例を1つ挙げられる？
-- IAM ユーザー + アクセスキー と、IAM Identity Center (SSO) の違いは？
-- 「認証 (Authentication)」と「認可 (Authorization)」の違いは？ 今回の設定ではそれぞれどれに当たる？
+```powershell
+aws login --profile study
+```
+
+- [x] CLI インストール
+- [x] `aws login` → `get-caller-identity` 成功
+- [x] プロファイルに既定リージョンを保存
+
+## 6. IAM をのぞいてみる（見るだけ。何も変更しない）
+
+> 解説：[study §4 IAM](phase0-study.md#4-iam)
+
+1. コンソールで「IAM」→「ロール」→ `AccountFullAccessRole` を開く
+2. 「許可」タブ：付いている許可ポリシーを確認する
+3. 「信頼関係」タブ：信頼ポリシーの JSON を読む
+4. AWS が自動で作った他のロールも眺める（**削除や編集はしない**。壊すと自分が操作できなくなる可能性がある）
+
+確認結果：
+
+| | 中身 |
+|---|---|
+| 許可ポリシー | `AdministratorAccess` |
+| 信頼ポリシー | `Principal: { "Service": "account-access.amazonaws.com" }`、`Action: sts:AssumeRole, sts:SetContext` |
+
+- [x] 完了

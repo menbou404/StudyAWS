@@ -17,3 +17,6 @@ __pycache__/
 # Node / CDK
 node_modules/
 cdk.out/
+
+# 個人の学習ログ（GitHub に上げない）
+docs/log/
