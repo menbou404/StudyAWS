@@ -26,11 +26,10 @@
 
 コンテナの PID 1 に **tini** という小さな init プログラムを置き、アプリをその子プロセスとして起動する。
 
-```
-init なし                 init: true
-PID 1  python            PID 1  tini（シグナルを子に転送する）
-                          └─ PID 7  python
-```
+| | PID 1 | その子 |
+|---|---|---|
+| init なし | python | — |
+| `init: true` | tini（受け取ったシグナルを子に転送する） | python |
 
 - tini は受け取った SIGTERM を python に転送する
 - python は PID 1 ではないので、ハンドラがなくても SIGTERM の既定の動き（終了）が働き、すぐ止まる
