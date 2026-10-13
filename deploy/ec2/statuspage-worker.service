@@ -1,0 +1,25 @@
+[Unit]
+Description=Statuspage monitoring worker
+# Compose の depends_on に相当する起動順序。ただし DB の正常性までは確認しない。
+After=network-online.target postgresql.service
+Wants=network-online.target postgresql.service
+
+[Service]
+Type=exec
+# Docker の appuser と同様、侵害時の影響を抑えるため root では実行しない。
+User=statuspage
+Group=statuspage
+WorkingDirectory=/opt/statuspage/app
+# Compose の environment に相当。秘密情報をリポジトリから分離する。
+EnvironmentFile=/etc/statuspage.env
+ExecStart=/opt/statuspage/app/.venv/bin/python -m statuspage.worker
+# Compose の restart: unless-stopped に相当する復旧設定だが、ここでは異常終了時だけ再起動する。
+Restart=on-failure
+RestartSec=5
+# Compose の停止と同様、SIGTERM → 猶予 → SIGKILL の順で停止する。
+# 旧版は SIGKILL されたが、現版は SIGTERM で今の回を終えるため通常は期限に達しない。
+# ただし監視対象が多く、1回の実行が30秒を超える場合は強制終了され得る。
+TimeoutStopSec=30
+
+[Install]
+WantedBy=multi-user.target

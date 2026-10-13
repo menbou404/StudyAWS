@@ -1,0 +1,24 @@
+[Unit]
+Description=Statuspage API
+# Compose の depends_on に相当する起動順序。ただし DB の正常性までは確認しない。
+After=network-online.target postgresql.service
+Wants=network-online.target postgresql.service
+
+[Service]
+Type=exec
+# Docker の appuser と同様、侵害時の影響を抑えるため root では実行しない。
+User=statuspage
+Group=statuspage
+WorkingDirectory=/opt/statuspage/app
+# Compose の environment に相当。秘密情報をリポジトリから分離する。
+EnvironmentFile=/etc/statuspage.env
+# Compose の ports に相当する入口は nginx に任せ、API への直接接続を防ぐ。
+ExecStart=/opt/statuspage/app/.venv/bin/uvicorn statuspage.api:app --host 127.0.0.1 --port 8000
+# Compose の restart: unless-stopped に相当する復旧設定だが、ここでは異常終了時だけ再起動する。
+Restart=on-failure
+RestartSec=5
+# Compose の停止と同様、SIGTERM 後に猶予を設け、期限を超えたら SIGKILL する。
+TimeoutStopSec=30
+
+[Install]
+WantedBy=multi-user.target
