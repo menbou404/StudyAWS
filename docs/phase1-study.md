@@ -1,6 +1,6 @@
 # Phase 1 知識まとめ: コンテナ・Docker Compose・アプリの設計
 
-> Phase 1 で出てきた知識を体系的にまとめたもの。手順と実験の記録は [phase1-setup.md](phase1-setup.md)。
+> Phase 1 で出てきた知識を体系的にまとめたもの。手順は [phase1-setup.md](phase1-setup.md)。
 
 ## 目次
 

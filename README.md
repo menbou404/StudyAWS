@@ -23,11 +23,14 @@
 
 ## ドキュメント
 
+書き方のルールは [docs/README.md](docs/README.md)。
+
 | ファイル | 内容 |
 |---|---|
 | `docs/phaseN-setup.md` | 手順書：AWS や手元で行う操作の手順と、その大まかな解説 |
 | `docs/phaseN-study.md` | 知識まとめ：その Phase で使う AWS の知識を体系的にまとめたもの |
 | `docs/phaseN-appendix.md` | 付録：その Phase では使っていないが、知っておくとよいもの（ない Phase もある） |
+| `docs/log/phaseN-result.md` | 各手順の確認結果・実測値（Git 管理外） |
 | `docs/log/` | 個人の学習ログ（Git 管理外） |
 
 - Phase 0: [手順書](docs/phase0-setup.md) / [知識まとめ](docs/phase0-study.md) / [付録](docs/phase0-appendix.md)

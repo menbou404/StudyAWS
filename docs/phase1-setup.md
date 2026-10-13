@@ -57,7 +57,7 @@ uv run pytest
 - AWS CLI は Phase 2 から使う（[phase0-setup.md](phase0-setup.md) の手順5）
 - 学習ログ（`docs/log/`）は Git 管理外なので、PC 間では共有されない
 
-- [x] 完了（Windows・macOS の両方で `uv run pytest` が成功）
+- [x] 完了
 
 ## 1. コードの構成を把握する
 
@@ -119,7 +119,10 @@ uv run python -m statuspage.worker
 ```
 
 http://localhost:8000/ で Example が UP、Broken が DOWN になることを確認する（監視は60秒ごと）。
-終わったら両方のターミナルで Ctrl+C。データは `app/dev.db`（SQLite）に残る（Git 管理外）。
+終わったら両方のターミナルで Ctrl+C。
+
+- 設定を何も渡さないと、DB は `app/dev.db`（SQLite）になる（Git 管理外）
+- `--reload` はコードを保存すると自動で再起動するオプション（開発用）
 
 - [x] 完了
 
@@ -135,20 +138,19 @@ docker build -t statuspage .
 docker run --rm -p 8000:8000 -e DATABASE_URL=sqlite:////tmp/dev.db statuspage
 ```
 
-実験：
+- `-t statuspage`：イメージに名前を付ける
+- 最後の `.`：ビルドコンテキスト（Docker に送るフォルダ）。Dockerfile と COPY するファイルがこの中にそろっている必要がある
+- `--rm`：止めたらコンテナを自動で削除する
+- `-p 8000:8000`：PC の 8000番をコンテナの 8000番につなぐ
+- `-e`：環境変数を渡す。一般ユーザー（appuser）で動くので、書き込める `/tmp` に SQLite を置く
 
-1. **キャッシュ**：もう一度 `docker build` する → ほぼ全行が `CACHED` になり一瞬で終わる
-2. **再ビルド**：`statuspage/` のコードを1行変えて `docker build` → `COPY statuspage` から下だけがやり直しになる
-3. **データが消える**：監視対象を追加 → Ctrl+C でコンテナを止める（`--rm` なので削除される）→ もう一度 `docker run` → 監視対象が消えている
+実験（それぞれ、何が起きるか予想してから実行する）：
 
-確認結果：
+1. **キャッシュ**：何も変えずにもう一度 `docker build` する
+2. **再ビルド**：`statuspage/` のコードを1行変えて `docker build` し、どの行からやり直しになるかを見る
+3. **データの寿命**：監視対象を追加 → Ctrl+C でコンテナを止める → もう一度 `docker run` → 監視対象を確認する
 
-- ビルドコンテキスト（最後の `.`）の中に、Dockerfile と COPY するファイルがそろっている必要がある
-- 一般ユーザー（appuser）で動かすので、root が作った `/app` には書き込めない → SQLite は `/tmp` を指定する
-- ある行がやり直しになると、それより下の行はすべてやり直し → **変わりにくいものを上、変わりやすいものを下**
-- コンテナの中に書いたデータは、コンテナを消すと消える → 状態はアプリの外に置く（ステートレス）
-
-- [x] 完了（キャッシュ、再ビルド、データが消えること）
+- [x] 完了
 
 ## 4. Docker Compose で3つまとめて動かす
 
@@ -164,13 +166,11 @@ docker compose up --build
 
 1. 手順2と同じように、監視対象を2つ追加する
 2. 最大1分待って、http://localhost:8000/ で UP / DOWN を確認する
-3. ログの `worker-1 |` の行に `UP` / `DOWN` / `checked 2 target(s)` が出ることを確認する
+3. ログの `worker-1 |` の行に、監視結果が出ることを確認する
 
-確認結果：
-
-- `@db:5432` の `db` はサービス名。Compose のネットワーク内で名前解決される（Phase 3 では RDS のエンドポイントに変わる）
+- 接続先 `@db:5432` の `db` はサービス名。Compose のネットワーク内で名前解決される
 - `ports` があるのは api だけ。DB は Compose のネットワークの中からしか見えない
-- api と worker は `depends_on: condition: service_healthy` で、DB のヘルスチェックが通ってから起動する
+- api と worker は、DB のヘルスチェックが通ってから起動する（`depends_on`）
 
 - [x] 完了
 
@@ -192,13 +192,12 @@ docker volume ls
 docker volume inspect studyaws_db-data
 ```
 
-確認結果：
+考えること：
 
-- **残っていた**。`down` で消えるのはコンテナとネットワークだけで、ボリューム `studyaws_db-data` は残る
-- `Mountpoint` は `/var/lib/docker/volumes/studyaws_db-data/_data`。これは Docker が動く **Linux VM の中** のパスで、Finder やエクスプローラーからは見えない
-  - macOS：`~/Library/Containers/com.docker.docker/Data/vms/0/data/Docker.raw` が VM のディスクの実体（見かけ 1TB、実使用 59GB だった）
-  - Windows：WSL2 の仮想ディスク（`.vhdx`）
-- 名前の `studyaws_` は Compose のプロジェクト名（フォルダ名）
+- 手順3の「データの寿命」の実験と、何が違うか
+- `Mountpoint` に表示されるパスは、PC のどこにあるか
+- このデータは、AWS に移したときに付いていくか
+
 - ⚠️ `docker compose down -v` はボリュームまで消す
 
 - [x] 完了
@@ -214,7 +213,7 @@ docker compose stop db
 docker compose logs -f worker
 ```
 
-1分ほどログを見る（http://localhost:8000/ も開いてみる）→ 別のターミナルで DB を再開し、さらに1分見る。
+1分ほどログを見る（http://localhost:8000/ と http://localhost:8000/healthz も開いてみる）→ 別のターミナルで DB を再開し、さらに1分見る。
 
 ```powershell
 docker compose start db
@@ -227,22 +226,12 @@ docker compose logs worker | Select-String "ERROR|OperationalError|checked"   # 
 docker compose logs worker | grep -E "ERROR|OperationalError|checked"         # macOS
 ```
 
-確認結果（2026-10-13）：
+考えること：
 
-```
-04:34:02  checked 2 target(s)                                       ← 正常
-04:35:02  ERROR AdminShutdown: terminating connection due to administrator command
-04:36:02  ERROR failed to resolve host 'db': Name or service not known
-          （ここで docker compose start db）
-04:37:03  checked 2 target(s)                                       ← 1回目から成功
-```
-
-- worker のコンテナは **止まらない**。`try / except` でエラーをログに出し、次の回でやり直す
-- エラーは2種類：①接続プールに残っていた接続が切られていた ②`db` という名前自体が消えていた
-- DB が戻ったあと **1回目から成功** した（接続プールがすでに空になっていたため）
-- api（`/`）は DB に届かず **500 エラー**（Internal Server Error）を返した。`/healthz` は DB を見ないので 200 のまま
-- DB が止まっていた2分間は、サイトのチェック自体が行われていない（最初に DB から監視対象の一覧を読むため）
-- 再開後の `DOWN https://this-does-not-exist.invalid/` はエラーではなく、Broken を正しく DOWN と記録したもの
+- DB が止まっている間、worker のコンテナは止まるか、動き続けるか
+- エラーは何種類出たか。それぞれ何が原因か
+- DB が戻ったあと、最初の1回目から記録できたか。それはなぜか
+- `/` と `/healthz` で、返ってくる結果が違うのはなぜか
 
 - [x] 完了
 
@@ -262,7 +251,7 @@ time docker compose stop api       # macOS
 time docker compose stop worker
 ```
 
-止まった後の終了コードを見る。
+止まった後の終了コードを見る（0 は正常終了、128 + n はシグナル n で終了）。
 
 ```powershell
 docker compose ps -a
@@ -270,7 +259,7 @@ docker compose ps -a
 
 ### 7-1. 修正前の worker を再現する
 
-**GitHub 上の worker はすでに修正済み**（2026-10-13）。修正前の挙動を見るには、修正前のファイルを一時的に取り出してビルドし直す。
+GitHub 上の worker は、SIGTERM を受け取って正常に止まるよう修正済み。修正前の挙動を見るには、修正前のファイルを一時的に取り出してビルドし直す。
 
 ```powershell
 git checkout 5be5992 -- app/statuspage/worker.py   # 修正前のファイルを取り出す
@@ -280,25 +269,13 @@ git checkout HEAD -- app/statuspage/worker.py      # 元に戻す
 docker compose up -d --build worker
 ```
 
-確認結果：
+考えること：
 
-| | 止まるまで | 終了コード |
-|---|---|---|
-| api（uvicorn） | 0.5秒 | 0 |
-| worker（修正前） | 10.1秒 | 137（= 128 + 9、SIGKILL） |
-| worker（修正後） | 0.3秒 | 0 |
+- api と修正前の worker で、止まるまでの時間と終了コードに違いはあるか
+- 違いがあるなら、その原因は何か（ヒント：`docker compose stop` は SIGTERM を送り、一定時間待っても止まらなければ SIGKILL を送る）
+- 修正後の worker（`app/statuspage/worker.py` の `handle_signal` と `run_forever`）は、どうやって問題を解決しているか
 
-- `docker compose stop` は SIGTERM を送り、10秒待っても止まらなければ SIGKILL で強制終了する
-- 原因は `sleep` ではなく **PID 1**。PID 1 は、受け取り方（ハンドラ）を書いていないシグナルを無視する。Python は SIGTERM のハンドラを持たない。uvicorn は自前で持っている
-- 修正：SIGTERM を受けたら `threading.Event` を立て、今の回を終えてから終了する。待機は `time.sleep` ではなく `stop.wait(timeout=...)` にして、合図が来たらすぐ起きる
-- 修正後の worker のログ：
-
-```
-05:02:31  received SIGTERM, stopping after current run
-05:02:31  worker stopped
-```
-
-- [x] 完了（修正は Codex が実装し、テスト3件を追加）
+- [x] 完了
 
 ## 8. 後片付け
 
