@@ -66,6 +66,11 @@ statuspage-vpc 10.0.0.0/16
 
 ## 0. 始める前に
 
+> 📖 **先に読む**
+> - [study §12 費用](phase2-study.md#12-費用)：「このPhaseでかかるもの」「停止と終了の使い分け」
+> 
+> 読んだら考える：停止中のインスタンスで、料金がかかり続けるものは何か
+
 1. リポジトリを `git pull` して、`deploy/ec2/` があることを確認する
 2. コンソール右上のリージョンが「アジアパシフィック (シドニー)」になっているか確認する（新方式では固定）
 3. Budgets の月次コスト予算（Phase 0 で作成）が有効か確認する
@@ -74,11 +79,14 @@ statuspage-vpc 10.0.0.0/16
 
 ## 1. ネットワークを作る
 
-> 解説：[study §3 VPC とサブネット](phase2-study.md#3-vpc-とサブネット)、[§4 ルーティングとインターネットゲートウェイ](phase2-study.md#4-ルーティングとインターネットゲートウェイ)
-
 コンソールの検索バーで「VPC」を開く。
 
 ### 1-1. VPC
+
+> 📖 **先に読む**
+> - [study §3 VPC とサブネット](phase2-study.md#3-vpc-とサブネット)：「VPC」「CIDR 表記」
+> 
+> 読んだら考える：`10.0.0.0/16` と `10.0.1.0/24` は、それぞれいくつのアドレスを表すか
 
 1. 「VPC を作成」→ **「VPC のみ」** を選ぶ（「VPC など」は全部自動で作ってしまうので、今回は使わない）
 2. 名前 `statuspage-vpc`、IPv4 CIDR `10.0.0.0/16`、IPv6 なし、テナンシーはデフォルト
@@ -89,6 +97,11 @@ statuspage-vpc 10.0.0.0/16
 
 ### 1-2. サブネット
 
+> 📖 **先に読む**
+> - [study §3 VPC とサブネット](phase2-study.md#3-vpc-とサブネット)：「サブネット」「パブリックサブネットとプライベートサブネット」「このプロジェクトの番号の割り当て」
+> 
+> 読んだら考える：サブネットを作るとき、なぜアベイラビリティゾーンを選ぶ必要があるのか
+
 1. 「サブネット」→「サブネットを作成」→ VPC に `statuspage-vpc` を選ぶ
 2. 名前 `statuspage-public-a`、アベイラビリティゾーン `ap-southeast-2a`、IPv4 CIDR `10.0.1.0/24`
 
@@ -97,12 +110,22 @@ statuspage-vpc 10.0.0.0/16
 
 ### 1-3. インターネットゲートウェイ
 
+> 📖 **先に読む**
+> - [study §4 ルーティングとインターネットゲートウェイ](phase2-study.md#4-ルーティングとインターネットゲートウェイ)：「インターネットゲートウェイ（IGW）」
+> 
+> 読んだら考える：インスタンスがインターネットとやり取りするのに必要な4つの条件のうち、この手順で満たすのはどれか
+
 1. 「インターネットゲートウェイ」→「作成」→ 名前 `statuspage-igw`
 2. 「アクション」→「VPC にアタッチ」→ `statuspage-vpc`
 
 - VPC とインターネットの出入口。VPC 1つにつき1つ
 
 ### 1-4. ルートテーブル
+
+> 📖 **先に読む**
+> - [study §4 ルーティングとインターネットゲートウェイ](phase2-study.md#4-ルーティングとインターネットゲートウェイ)：「ルートテーブル」
+> 
+> 読んだら考える：このルートテーブルをサブネットに関連付けると、なぜそのサブネットが「パブリック」になるのか
 
 1. 「ルートテーブル」→「ルートテーブルを作成」→ 名前 `statuspage-public-rt`、VPC `statuspage-vpc`
 2. 「ルート」タブ →「ルートを編集」→「ルートを追加」：送信先 `0.0.0.0/0`、ターゲット「インターネットゲートウェイ」→ `statuspage-igw`
@@ -118,7 +141,11 @@ statuspage-vpc 10.0.0.0/16
 
 ## 2. IAM ロールを作る
 
-> 解説：[study §6 IAM ロールと EC2](phase2-study.md#6-iam-ロールと-ec2)
+> 📖 **先に読む**
+> - [study §6 IAM ロールと EC2](phase2-study.md#6-iam-ロールと-ec2)：全体
+> - [phase0-study §4 IAM](phase0-study.md#4-iam)：「2種類のポリシー」（復習）
+> 
+> 読んだら考える：信頼ポリシーと許可ポリシーは、それぞれ何を決めるか。今回の `Principal` は誰か
 
 1. コンソールで「IAM」→「ロール」→「ロールを作成」
 2. 信頼されたエンティティタイプ「AWS のサービス」、ユースケース「EC2」
@@ -134,7 +161,11 @@ statuspage-vpc 10.0.0.0/16
 
 ## 3. セキュリティグループを作る
 
-> 解説：[study §5 セキュリティグループ](phase2-study.md#5-セキュリティグループ)
+> 📖 **先に読む**
+> - [study §5 セキュリティグループ](phase2-study.md#5-セキュリティグループ)：「性質」「ルールの例」
+> - [study §4 ルーティングとインターネットゲートウェイ](phase2-study.md#4-ルーティングとインターネットゲートウェイ)：「自宅のネットワークと『マイ IP』」
+> 
+> 読んだら考える：受信ルールを HTTP だけにしても、サーバーからパッケージをダウンロードできるのはなぜか
 
 1. 「EC2」→「セキュリティグループ」→「セキュリティグループを作成」
 2. 名前 `statuspage-web-sg`、説明 `statuspage web`、VPC `statuspage-vpc`
@@ -150,7 +181,11 @@ statuspage-vpc 10.0.0.0/16
 
 ## 4. EC2 インスタンスを起動する
 
-> 解説：[study §1 EC2](phase2-study.md#1-ec2)、[§2 EBS](phase2-study.md#2-ebs)
+> 📖 **先に読む**
+> - [study §1 EC2](phase2-study.md#1-ec2)：「インスタンスを作るときに決めること」「インスタンスタイプの読み方」「Arm（Graviton）と x86」
+> - [study §2 EBS](phase2-study.md#2-ebs)：表と「Phase 1 との対応」
+> 
+> 読んだら考える：起動画面の各項目は、Phase 1 の Docker の何に相当するか
 
 「EC2」→「インスタンス」→「インスタンスを起動」。
 
@@ -176,7 +211,11 @@ statuspage-vpc 10.0.0.0/16
 
 ## 5. Session Manager でサーバーに入る
 
-> 解説：[study §7 Session Manager](phase2-study.md#7-session-manager)
+> 📖 **先に読む**
+> - [study §7 Session Manager](phase2-study.md#7-session-manager)：全体
+> - [study §6 IAM ロールと EC2](phase2-study.md#6-iam-ロールと-ec2)：「仕組み」（IMDS）
+> 
+> 読んだら考える：22番を開けていないのに入れるのはなぜか。何が欠けると入れなくなるか
 
 1. インスタンスを選択 →「接続」→「Session Manager」タブ →「接続」
 2. ブラウザの中に黒い画面（シェル）が開く
@@ -195,7 +234,10 @@ uname -m                # aarch64（Arm）
 
 ## 6. サーバーの準備
 
-> 解説：[study §8 Linux サーバーの基本](phase2-study.md#8-linux-サーバーの基本ユーザー権限パッケージ)
+> 📖 **先に読む**
+> - [study §8 Linux サーバーの基本](phase2-study.md#8-linux-サーバーの基本ユーザー権限パッケージ)：「ユーザー」「よく使う場所」「パッケージ管理」
+> 
+> 読んだら考える：アプリを `root` ではなく `statuspage` ユーザーで動かすのはなぜか
 
 以降のコマンドはすべて Session Manager の画面で実行する。
 
@@ -226,7 +268,10 @@ curl -LsSf https://astral.sh/uv/0.11.21/install.sh | sudo env UV_INSTALL_DIR=/us
 
 ## 7. PostgreSQL を準備する
 
-> 解説：[study §8 Linux サーバーの基本](phase2-study.md#8-linux-サーバーの基本ユーザー権限パッケージ)
+> 📖 **先に読む**
+> - [study §8 Linux サーバーの基本](phase2-study.md#8-linux-サーバーの基本ユーザー権限パッケージ)：「PostgreSQL の認証（pg_hba.conf）」
+> 
+> 読んだら考える：`sudo -u postgres psql` はパスワードなしで入れるのに、アプリはパスワードが必要なのはなぜか
 
 ### 7-1. 初期化して、パスワード認証に切り替える
 
@@ -258,7 +303,10 @@ sudo -u postgres psql -c "CREATE DATABASE statuspage OWNER statuspage;"
 
 ## 8. アプリを配置する
 
-> 解説：[study §8 Linux サーバーの基本](phase2-study.md#8-linux-サーバーの基本ユーザー権限パッケージ)
+> 📖 **先に読む**
+> - [study §8 Linux サーバーの基本](phase2-study.md#8-linux-サーバーの基本ユーザー権限パッケージ)：「ファイルの権限」「よく使う場所」
+> 
+> 読んだら考える：`/etc/statuspage.env` の権限を `600` にしても、アプリが環境変数を受け取れるのはなぜか
 
 ### 8-1. コードを取得する
 
@@ -293,7 +341,10 @@ ls -l /etc/statuspage.env
 
 ## 9. systemd でサービスにする
 
-> 解説：[study §9 systemd](phase2-study.md#9-systemd)
+> 📖 **先に読む**
+> - [study §9 systemd](phase2-study.md#9-systemd)：「Phase 1 との対応」「よく使うコマンド」「起動の順番と依存」
+> 
+> 読んだら考える：`deploy/ec2/*.service` の各行は、`compose.yaml` のどの行に相当するか
 
 `deploy/ec2/statuspage-api.service` と `statuspage-worker.service` を読む（各行の意味と、Phase 1 の `compose.yaml` との対応がコメントにある）。そのうえで：
 
@@ -319,7 +370,11 @@ journalctl -u statuspage-worker -f
 
 ## 10. nginx を設定して、ブラウザで確認する
 
-> 解説：[study §10 nginx とリバースプロキシ](phase2-study.md#10-nginx-とリバースプロキシ)
+> 📖 **先に読む**
+> - [study §10 nginx とリバースプロキシ](phase2-study.md#10-nginx-とリバースプロキシ)：「なぜアプリの前に置くのか」「転送するときのヘッダー」
+> - [study §8 Linux サーバーの基本](phase2-study.md#8-linux-サーバーの基本ユーザー権限パッケージ)：「1024番未満のポート」
+> 
+> 読んだら考える：api を `127.0.0.1:8000` で待ち受けさせるのはなぜか
 
 ```bash
 sudo cp /opt/statuspage/deploy/ec2/statuspage.nginx.conf /etc/nginx/conf.d/statuspage.conf
@@ -342,7 +397,9 @@ curl -s localhost/healthz
 
 ## 11. 実験A：停止と起動で、何が変わって何が残るか
 
-> 解説：[study §1 EC2](phase2-study.md#1-ec2)、[§2 EBS](phase2-study.md#2-ebs)
+> 📖 **実験のあとに読む**
+> - [study §1 EC2](phase2-study.md#1-ec2)：「インスタンスの状態と課金」
+> - [study §2 EBS](phase2-study.md#2-ebs)：「性質」
 
 予想してから実行する。
 
@@ -361,7 +418,8 @@ curl -s localhost/healthz
 
 ## 12. 実験B：プロセスの止め方と systemd の動き
 
-> 解説：[study §9 systemd](phase2-study.md#9-systemd)
+> 📖 **実験のあとに読む**
+> - [study §9 systemd](phase2-study.md#9-systemd)：「Restart= の種類」「止め方」
 
 Session Manager で、worker のプロセスを3通りの方法で止める。それぞれ予想してから実行し、`systemctl status` と `journalctl` で結果を見る。
 
@@ -392,6 +450,10 @@ journalctl -u statuspage-worker -n 20 --no-pager
 
 ## 13. 実験C：サーバーを再起動する
 
+> 📖 **実験のあとに読む**
+> - [study §9 systemd](phase2-study.md#9-systemd)：「よく使うコマンド」（`start` と `enable` の違い）
+> - [study §1 EC2](phase2-study.md#1-ec2)：「インスタンスの状態と課金」の2つ目の表
+
 予想してから実行する。
 
 ```bash
@@ -414,7 +476,9 @@ uptime
 
 ## 14. 実験D：つながらない原因を見分ける
 
-> 解説：[study §11 つながらないときの切り分け](phase2-study.md#11-つながらないときの切り分け)
+> 📖 **実験のあとに読む**
+> - [study §11 つながらないときの切り分け](phase2-study.md#11-つながらないときの切り分け)：全体
+> - [study §10 nginx とリバースプロキシ](phase2-study.md#10-nginx-とリバースプロキシ)：「nginx が返すエラー」
 
 3つの壊し方を1つずつ試し、ブラウザと手元の PC の `curl` で、エラーの出方を比べる。**1つ試したら元に戻してから次へ。**
 
@@ -439,7 +503,9 @@ curl -m 10 -v http://<パブリック IP>/healthz
 
 ## 15. 毎回の終わりに・IP アドレスが変わったとき
 
-> 解説：[study §12 費用](phase2-study.md#12-費用)
+> 📖 **先に読む**
+> - [study §12 費用](phase2-study.md#12-費用)：「停止と終了の使い分け」
+> - [study §4 ルーティングとインターネットゲートウェイ](phase2-study.md#4-ルーティングとインターネットゲートウェイ)：「自宅のネットワークと『マイ IP』」
 
 ### 学習を終えるとき
 
@@ -459,6 +525,9 @@ curl -m 10 -v http://<パブリック IP>/healthz
 - [ ] 理解した
 
 ## 16. Phase 2 の片付け
+
+> 📖 **先に読む**
+> - [study §13 ほかの Phase とのつながり](phase2-study.md#13-ほかの-phase-とのつながり)：「この構成の弱点と、解決する Phase」
 
 Phase 2 を終えて Phase 3 に進むとき。
 
