@@ -31,7 +31,7 @@
 | `docs/log/` | 個人の学習ログ（Git 管理外） |
 
 - Phase 0: [手順書](docs/phase0-setup.md) / [知識まとめ](docs/phase0-study.md) / [付録](docs/phase0-appendix.md)
-- Phase 1: [手順書](docs/phase1-setup.md)（Step 3 まで完了、知識まとめは作成中）
+- Phase 1: [手順書](docs/phase1-setup.md) / [知識まとめ](docs/phase1-study.md) / [付録](docs/phase1-appendix.md)
 
 ## 環境
 
