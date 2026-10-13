@@ -95,6 +95,14 @@ aws --version
 
 `aws-cli/2.x.x` と表示されれば OK（2.37.12 で動作確認済み）。`aws login` は新しいコマンドなので、古い CLI の場合は更新する。
 
+macOS の場合は Homebrew で入れる（更新は `brew upgrade awscli`）：
+
+```bash
+brew install awscli
+```
+
+以降の手順は macOS でも同じ。ただし設定ファイルの確認は `Get-Content $HOME\.aws\config` の代わりに `cat ~/.aws/config`。
+
 ### 5-2. ログイン
 
 ```powershell
