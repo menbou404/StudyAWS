@@ -4,8 +4,11 @@
 """
 
 import logging
+import signal
+import threading
 import time
 from datetime import timedelta
+from types import FrameType
 
 from sqlalchemy import delete, select
 
@@ -14,6 +17,7 @@ from statuspage.config import CHECK_INTERVAL_SECONDS, CHECK_TIMEOUT_SECONDS, RET
 from statuspage.db import Check, SessionLocal, Target, init_db, utcnow
 
 logger = logging.getLogger("statuspage.worker")
+stop_event = threading.Event()
 
 
 def run_once() -> int:
@@ -50,13 +54,13 @@ def run_once() -> int:
     return len(targets)
 
 
-def main() -> None:
-    logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s: %(message)s")
-    logging.getLogger("httpx").setLevel(logging.WARNING)  # 自前のログと重複するので抑える
-    init_db()
-    logger.info("worker started (interval=%ss, timeout=%ss)", CHECK_INTERVAL_SECONDS, CHECK_TIMEOUT_SECONDS)
+def handle_signal(signum: int, frame: FrameType | None) -> None:
+    stop_event.set()
+    logger.info("received %s, stopping after current run", signal.Signals(signum).name)
 
-    while True:
+
+def run_forever(stop: threading.Event) -> None:
+    while not stop.is_set():
         started = time.monotonic()
         try:
             count = run_once()
@@ -65,7 +69,19 @@ def main() -> None:
             # DB が一時的に落ちていても、ジョブ自体は止めずに次の回でやり直す
             logger.exception("check run failed")
         elapsed = time.monotonic() - started
-        time.sleep(max(0.0, CHECK_INTERVAL_SECONDS - elapsed))
+        stop.wait(timeout=max(0.0, CHECK_INTERVAL_SECONDS - elapsed))
+    logger.info("worker stopped")
+
+
+def main() -> None:
+    logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s: %(message)s")
+    logging.getLogger("httpx").setLevel(logging.WARNING)  # 自前のログと重複するので抑える
+    # PID 1 はハンドラなしだと SIGTERM を無視する。ECS/systemd は SIGTERM の後に SIGKILL を送る。
+    signal.signal(signal.SIGTERM, handle_signal)
+    signal.signal(signal.SIGINT, handle_signal)
+    init_db()
+    logger.info("worker started (interval=%ss, timeout=%ss)", CHECK_INTERVAL_SECONDS, CHECK_TIMEOUT_SECONDS)
+    run_forever(stop_event)
 
 
 if __name__ == "__main__":

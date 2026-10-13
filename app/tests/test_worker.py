@@ -1,10 +1,58 @@
+import logging
+import signal
+import threading
 from datetime import timedelta
+from unittest.mock import Mock
 
 import httpx
 
 from statuspage import checker, worker
 from statuspage.checker import CheckResult, check_url
 from statuspage.db import Check, SessionLocal, utcnow
+
+
+def test_run_forever_already_stopped(monkeypatch, caplog):
+    stop = threading.Event()
+    stop.set()
+    run_once = Mock()
+    monkeypatch.setattr(worker, "run_once", run_once)
+
+    with caplog.at_level(logging.INFO, logger="statuspage.worker"):
+        worker.run_forever(stop)
+
+    run_once.assert_not_called()
+    assert "worker stopped" in caplog.messages
+
+
+def test_run_forever_stops_after_current_run(monkeypatch):
+    stop = threading.Event()
+
+    def fake_run_once():
+        stop.set()
+        return 1
+
+    run_once = Mock(side_effect=fake_run_once)
+    # セット済みの Event.wait は待たずに戻る。本物のスリープは使わない。
+    wait = Mock(wraps=stop.wait)
+    monkeypatch.setattr(worker, "run_once", run_once)
+    monkeypatch.setattr(stop, "wait", wait)
+    monkeypatch.setattr(worker.time, "monotonic", Mock(side_effect=[10.0, 12.0]))
+
+    worker.run_forever(stop)
+
+    run_once.assert_called_once_with()
+    wait.assert_called_once_with(timeout=max(0.0, worker.CHECK_INTERVAL_SECONDS - 2.0))
+
+
+def test_handle_signal_sets_stop_event(monkeypatch, caplog):
+    stop = threading.Event()
+    monkeypatch.setattr(worker, "stop_event", stop)
+
+    with caplog.at_level(logging.INFO, logger="statuspage.worker"):
+        worker.handle_signal(signal.SIGTERM, None)
+
+    assert stop.is_set()
+    assert caplog.messages == ["received SIGTERM, stopping after current run"]
 
 
 def test_run_once_records_results(client, monkeypatch):
