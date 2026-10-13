@@ -1,0 +1,41 @@
+services:
+  # ① データベース：公式の PostgreSQL イメージをそのまま使う（自分でビルドしない）
+  db:
+    image: postgres:17
+    environment:
+      POSTGRES_USER: statuspage
+      POSTGRES_PASSWORD: statuspage   # 手元専用。AWS では Secrets Manager を使う（Phase 3）
+      POSTGRES_DB: statuspage
+    volumes:
+      - db-data:/var/lib/postgresql/data   # DB のデータをボリュームに保存する
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U statuspage -d statuspage"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  # ② API：app フォルダの Dockerfile からビルドする
+  api:
+    build: ./app
+    ports:
+      - "8000:8000"
+    environment:
+      DATABASE_URL: postgresql+psycopg://statuspage:statuspage@db:5432/statuspage
+    depends_on:
+      db:
+        condition: service_healthy   # DB のヘルスチェックが通ってから起動する
+    restart: unless-stopped
+
+  # ③ 監視ジョブ：api と「同じイメージ」を、別のコマンドで起動する
+  worker:
+    build: ./app
+    command: ["python", "-m", "statuspage.worker"]
+    environment:
+      DATABASE_URL: postgresql+psycopg://statuspage:statuspage@db:5432/statuspage
+    depends_on:
+      db:
+        condition: service_healthy
+    restart: unless-stopped
+
+volumes:
+  db-data:
