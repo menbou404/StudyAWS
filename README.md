@@ -11,8 +11,8 @@
 | Phase | 内容 | 学べること | 状態 |
 |---|---|---|---|
 | 0. 準備 | アカウントの安全設定、請求アラート、AWS CLI | Builder ID, MFA, IAM（ロールとポリシーの基本）, Budgets, AWS CLI (`aws login`) | ✅ |
-| 1. アプリ作成 | FastAPI で API + 監視ジョブ、Docker Compose で実行 | Docker | 🚧 |
-| 2. EC2に手で載せる | nginx + systemd で常駐 | VPC, サブネット, セキュリティグループ, IAM ロール, Session Manager | |
+| 1. アプリ作成 | FastAPI で API + 監視ジョブ、Docker Compose で実行 | Docker | ✅ |
+| 2. EC2に手で載せる | nginx + systemd で常駐 | VPC, サブネット, セキュリティグループ, IAM ロール, Session Manager | 🚧 |
 | 3. DBを分離 | RDS (PostgreSQL) をプライベートサブネットへ | パブリック/プライベート設計 | |
 | 4. 冗長化 | ALB + Auto Scaling, 独自ドメイン + HTTPS | ロードバランサー, マルチAZ, Route 53, ACM | |
 | 5. コード化 | ここまでの構成を AWS CDK (TypeScript) で再現 | IaC | |
@@ -35,6 +35,7 @@
 
 - Phase 0: [手順書](docs/phase0-setup.md) / [知識まとめ](docs/phase0-study.md) / [付録](docs/phase0-appendix.md)
 - Phase 1: [手順書](docs/phase1-setup.md) / [知識まとめ](docs/phase1-study.md) / [付録](docs/phase1-appendix.md)
+- Phase 2: [手順書](docs/phase2-setup.md) / [知識まとめ](docs/phase2-study.md) / [付録](docs/phase2-appendix.md)
 
 ## 環境
 
