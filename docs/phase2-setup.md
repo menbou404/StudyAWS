@@ -404,9 +404,11 @@ sudo systemctl enable --now nginx
 curl -s localhost/healthz
 ```
 
-- `nginx -t` は設定の文法チェック。`syntax is ok` と `test is successful` が出れば OK（`conflicting server name "_"` という warn は出てもよい）
+- `nginx -t` は設定の文法チェック。`syntax is ok` と `test is successful` が出れば OK（`conflicting server name "_"` という warn は出てもよい。`nginx.conf` に最初からある設定とぶつかっているが、先に読み込まれる `statuspage.conf` が使われる）
 - `curl -s localhost/healthz` で `{"status":"ok"}` が返れば、nginx → api の転送ができている
-  - nginx のウェルカムページ（HTML）が返ってきたら、`/etc/nginx/nginx.conf` の中の `server { ... }` ブロックが優先されている。そのブロックをコメントアウトして `sudo systemctl reload nginx`
+  - nginx の HTML のページ（404 やウェルカムページ）が返ってきたら、`nginx.conf` に最初からある設定が応答している。`sudo nginx -T 2>/dev/null | grep -nE 'listen|server_name|include .*conf.d'` で、どの設定がどのアドレスで待ち受けているかを調べる
+  - `curl -s 127.0.0.1/healthz`（IPv4）と `curl -s "http://[::1]/healthz"`（IPv6）を比べると、どちらで行き先が違うか分かる
+- `systemctl reload` は、今の通信を切らずに設定だけ読み直す（`restart` は止めて起動し直す）
 
 ブラウザで確認する：
 
