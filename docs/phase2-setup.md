@@ -380,12 +380,12 @@ curl -s localhost:8000/healthz
 ログを見る（Ctrl+C で抜ける）：
 
 ```bash
-journalctl -u statuspage-worker -f
+sudo journalctl -u statuspage-worker -f
 ```
 
 - `daemon-reload`：systemd に「設定ファイルを読み直して」と伝える
 - `status` の `Active: active (running)` が動いている状態
-- `journalctl` は systemd が集めたログを見るコマンド（Phase 1 の `docker compose logs` に相当）
+- `journalctl` は systemd が集めたログを見るコマンド（Phase 1 の `docker compose logs` に相当）。サービスのログはシステムのログなので、`ssm-user` では `sudo` が必要（付けないと `You are currently not seeing messages from other users and the system` と出て何も表示されない）
 
 - [ ] 完了
 
@@ -458,7 +458,7 @@ systemctl show -p MainPID statuspage-worker     # worker のプロセス番号�
 
 ```bash
 systemctl status statuspage-worker --no-pager
-journalctl -u statuspage-worker -n 20 --no-pager
+sudo journalctl -u statuspage-worker -n 20 --no-pager
 ```
 
 考えること：

@@ -443,7 +443,7 @@ PostgreSQL は、接続ごとに **「どこから来たか」で認証の方法
 | `systemctl enable --now <名前>` | 登録して、今すぐ起動もする |
 | `systemctl status <名前>` | 状態と最新のログを表示する |
 | `systemctl daemon-reload` | ユニットファイルを書き換えたあと、読み直させる |
-| `journalctl -u <名前> -f` | ログを追いかけて表示する |
+| `sudo journalctl -u <名前> -f` | ログを追いかけて表示する（システムのログは root か `adm`・`systemd-journal`・`wheel` グループでないと読めないので `sudo` を付ける） |
 
 `start` と `enable` は別物。`start` だけだと、サーバーを再起動したときに起動しない。
 
@@ -544,7 +544,7 @@ ALB も同じヘッダーを付けて転送する（Phase 4）。
 | `curl -s localhost:8000/healthz` | nginx を通さずに、アプリが応答するか |
 | `curl -s localhost/healthz` | nginx を通して応答するか |
 | `sudo ss -tlnp` | どのプロセスが、どのアドレス・ポートで待ち受けているか |
-| `journalctl -u <サービス> -n 50` | 最近のログ |
+| `sudo journalctl -u <サービス> -n 50` | 最近のログ |
 
 外からはつながらないのに中からはつながる → ネットワークかセキュリティグループの問題、と絞り込める。
 
