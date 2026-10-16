@@ -268,7 +268,7 @@ curl -LsSf https://astral.sh/uv/0.11.21/install.sh | sudo env UV_INSTALL_DIR=/us
 - uv は Dockerfile と同じバージョンを、全ユーザーが使える `/usr/local/bin` に入れる
 - `sudo` で動かすコマンドからは `/usr/local/bin` が見えないことがあるので、以降は `/usr/local/bin/uv` と書く
 
-- [ ] 完了
+- [x] 完了
 
 ## 7. PostgreSQL を準備する
 
