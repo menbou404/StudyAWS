@@ -358,7 +358,7 @@ cat /etc/statuspage.env                                            # 一般ユ�
 - パスワードを画面に出したり、どこかに貼ったりしてしまったら、`DB_PASSWORD=$(openssl rand -hex 16)` → `sudo -u postgres psql -c "ALTER USER statuspage WITH PASSWORD '$DB_PASSWORD';"` で作り直し、このファイルも作り直す
 - パスワードが入ったこのファイルは、サーバーの中にだけ置く（リポジトリには入れない）
 
-- [ ] 完了
+- [x] 完了
 
 ## 9. systemd でサービスにする
 
