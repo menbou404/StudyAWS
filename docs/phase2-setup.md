@@ -387,7 +387,7 @@ sudo journalctl -u statuspage-worker -f
 - `status` の `Active: active (running)` が動いている状態
 - `journalctl` は systemd が集めたログを見るコマンド（Phase 1 の `docker compose logs` に相当）。サービスのログはシステムのログなので、`ssm-user` では `sudo` が必要（付けないと `You are currently not seeing messages from other users and the system` と出て何も表示されない）
 
-- [ ] 完了
+- [x] 完了
 
 ## 10. nginx を設定して、ブラウザで確認する
 
@@ -416,7 +416,7 @@ curl -s localhost/healthz
 2. `http://<パブリック IP>/docs` を開き、Phase 1 と同じように監視対象を2つ追加する（**`https://` ではなく `http://`**）
 3. 1分ほど待って `http://<パブリック IP>/` を開き、UP / DOWN を確認する
 
-- [ ] 完了
+- [x] 完了
 
 ## 11. 実験A：停止と起動で、何が変わって何が残るか
 
