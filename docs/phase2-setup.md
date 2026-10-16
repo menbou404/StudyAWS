@@ -346,14 +346,16 @@ sudo -u statuspage -H /usr/local/bin/uv sync --locked --no-dev
 
 ```bash
 sudo install -m 600 -o root -g root /opt/statuspage/deploy/ec2/statuspage.env.example /etc/statuspage.env
-sudo sed -i "s/CHANGE_ME/$DB_PASSWORD/" /etc/statuspage.env
-sudo sed -E 's#(://[^:]+:)[^@]+@#\1****@#' /etc/statuspage.env    # パスワードを伏せて中身を確認する
+sudo sed -i "/^DATABASE_URL=/s/CHANGE_ME/$DB_PASSWORD/" /etc/statuspage.env
+sudo grep '^DATABASE_URL=' /etc/statuspage.env | sed -E 's#(://[^:]+:)[^@]+@#\1****@#'   # パスワードを伏せて確認する
 ls -l /etc/statuspage.env
 cat /etc/statuspage.env                                            # 一般ユーザー（ssm-user）では読めないことを確認する
 ```
 
 - `install -m 600 -o root` は「コピーして、所有者を root、権限を root だけが読み書きできる状態にする」
-- `CHANGE_ME` が `****` に置き換わって表示されれば、パスワードが入っている。`sudo cat` で中身をそのまま表示すると、パスワードが画面に出るので避ける
+- `sed` の先頭の `/^DATABASE_URL=/` は「`DATABASE_URL=` で始まる行だけ」という意味。見本ファイルのコメントにも `CHANGE_ME` があるので、付けないとコメントの中までパスワードに置き換わる
+- 確認の行で、パスワードの部分が `****` になっていれば OK。**`sudo cat` などでファイル全体を表示しない**（パスワードが画面に出る）
+- パスワードを画面に出したり、どこかに貼ったりしてしまったら、`DB_PASSWORD=$(openssl rand -hex 16)` → `sudo -u postgres psql -c "ALTER USER statuspage WITH PASSWORD '$DB_PASSWORD';"` で作り直し、このファイルも作り直す
 - パスワードが入ったこのファイルは、サーバーの中にだけ置く（リポジトリには入れない）
 
 - [ ] 完了
