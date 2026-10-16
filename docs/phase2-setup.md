@@ -302,8 +302,21 @@ sudo -u postgres psql -c "CREATE DATABASE statuspage OWNER statuspage;"
 
 - パスワードはランダムに作り、変数 `DB_PASSWORD` に入れておく（手順8-3で使うので、**同じ画面のまま続ける**）
 - Session Manager の画面を閉じてしまったら、`sudo -u postgres psql -c "ALTER USER statuspage WITH PASSWORD '...';"` で作り直す
+- PostgreSQL の「ユーザー」と「ロール」は同じもの（`CREATE USER` は「ログインできるロールを作る」の省略形）。IAM ロールとは別物
 
-- [ ] 完了
+確かめる：
+
+```bash
+sudo -u postgres psql -c "\du"
+PGPASSWORD="$DB_PASSWORD" psql -h 127.0.0.1 -U statuspage -d statuspage -c "SELECT current_user;"
+psql -h 127.0.0.1 -U statuspage -d statuspage -c "SELECT current_user;"
+```
+
+- 1行目：`postgres` と `statuspage` の属性（Attributes）を比べる
+- 2行目：アプリと同じ方法（TCP + パスワード）で接続する
+- 3行目：パスワードなしで接続するとどうなるか（パスワードを聞かれたら、何も入れずに Enter）
+
+- [x] 完了
 
 ## 8. アプリを配置する
 
@@ -334,11 +347,13 @@ sudo -u statuspage -H /usr/local/bin/uv sync --locked --no-dev
 ```bash
 sudo install -m 600 -o root -g root /opt/statuspage/deploy/ec2/statuspage.env.example /etc/statuspage.env
 sudo sed -i "s/CHANGE_ME/$DB_PASSWORD/" /etc/statuspage.env
-sudo cat /etc/statuspage.env
+sudo sed -E 's#(://[^:]+:)[^@]+@#\1****@#' /etc/statuspage.env    # パスワードを伏せて中身を確認する
 ls -l /etc/statuspage.env
+cat /etc/statuspage.env                                            # 一般ユーザー（ssm-user）では読めないことを確認する
 ```
 
 - `install -m 600 -o root` は「コピーして、所有者を root、権限を root だけが読み書きできる状態にする」
+- `CHANGE_ME` が `****` に置き換わって表示されれば、パスワードが入っている。`sudo cat` で中身をそのまま表示すると、パスワードが画面に出るので避ける
 - パスワードが入ったこのファイルは、サーバーの中にだけ置く（リポジトリには入れない）
 
 - [ ] 完了
