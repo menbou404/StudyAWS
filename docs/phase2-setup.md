@@ -247,11 +247,14 @@ uname -m                # aarch64（Arm）
 ```bash
 sudo dnf install -y git nginx
 dnf list available 'postgresql*-server'     # 入れられる PostgreSQL のバージョンを確認
-sudo dnf install -y postgresql16-server     # 一覧にある中から選ぶ（ここでは 16）
+sudo dnf install -y postgresql17-server     # 手元の Compose（postgres:17）と同じ 17 を選ぶ
+ls /usr/bin/postgresql-setup                # 手順7で使う初期化コマンドがあるか
+systemctl list-unit-files 'postgresql*'     # サービス名が postgresql.service か
 ```
 
 - `dnf` は Amazon Linux のパッケージ管理（Mac の Homebrew、Windows の winget に相当）
-- 手元の Compose は PostgreSQL 17 だが、このアプリの使い方ならバージョンの違いは問題にならない
+- 手元（Compose）・EC2・RDS（Phase 3）でバージョンをそろえておくと、違いを気にしなくてよい。一覧に 17 がなければ、一番近いものを選ぶ（このアプリの使い方なら違いは問題にならない）
+- 入れた直後のサービスは `disabled`（サーバー起動時に自動で起動しない）。手順7で有効にする
 
 ### 6-2. アプリ用のユーザーと uv を用意する
 
