@@ -458,6 +458,29 @@ PostgreSQL は、接続ごとに **「どこから来たか」で認証の方法
 - `systemctl stop` で止めたときは、どの設定でも再起動しない（人が意図して止めたため）
 - Compose の `unless-stopped` は「人が止めた以外は常に再起動」なので、systemd の `always` に近い
 
+### systemd は「自分が止めた」かどうかで見分ける
+
+`systemctl stop` も、中身は SIGTERM を送っている。プロセスから見ると、`kill -TERM` で外から送られた SIGTERM と区別がつかない。
+
+| 止め方 | 誰が止めたか | systemd のログ | 再起動するか |
+|---|---|---|---|
+| `systemctl stop` | systemd 自身 | `Stopping ...` のあとに SIGTERM | しない（どの設定でも） |
+| `kill -TERM <PID>` | systemd 以外 | `Stopping ...` がない | `Restart=` と終わり方で決まる（`on-failure` なら正常終了なのでしない、`always` ならする） |
+| `kill -9 <PID>` | systemd 以外 | `code=killed, status=9/KILL` | `on-failure` でも `always` でもする |
+
+SIGKILL はプログラムが受け取れないので、後片付けをする暇なく即終了する。
+
+### どれを選ぶか
+
+| 設定 | 向いているもの |
+|---|---|
+| `on-failure` | 正常終了が「仕事が終わった」を意味するもの |
+| `always` | サーバーや監視ジョブなど、ずっと動き続けてほしいもの。止めたいときは `systemctl stop` を使う |
+
+- `on-failure` の常駐プロセスが、バグなどで正常終了すると、**止まったまま誰も気づかない**
+- `Restart=` は「プロセスが落ちた」ことしか直せない。プロセスは動いているのに仕事をしていない状態は、外からの監視（Phase 9 の CloudWatch アラームなど）で見つける
+- ECS（Phase 7）は、終了コードに関係なく、決めた数のタスクが動き続けるように起動し直す（`always` に近い）
+
 ### 止め方
 
 `systemctl stop` は Docker と同じ順で止める。

@@ -469,7 +469,7 @@ sudo journalctl -u statuspage-worker -n 20 --no-pager
 - Phase 1 の Compose の `restart: unless-stopped` だったら、結果は変わるか
 - 終わったら、worker が動いている状態に戻しておく（`sudo systemctl start statuspage-worker`）
 
-- [ ] 完了
+- [x] 完了
 
 ## 13. 実験C：サーバーを再起動する
 
