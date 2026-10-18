@@ -545,7 +545,7 @@ curl -m 10 -v http://<パブリック IP>/healthz
 
 - Session Manager は IP アドレスの制限を受けないので、どの PC・どの場所からでも入れる
 
-- [ ] 理解した
+- [x] 理解した
 
 ## 16. Phase 2 の片付け
 
