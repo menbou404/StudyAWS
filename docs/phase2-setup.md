@@ -437,7 +437,7 @@ curl -s localhost/healthz
 - api・worker・PostgreSQL・nginx は、自分で起動しなくても動いているか
 - 停止中に課金されるもの、されないものは何か
 
-- [ ] 完了
+- [x] 完了
 
 ## 12. 実験B：プロセスの止め方と systemd の動き
 
