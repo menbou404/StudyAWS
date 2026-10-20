@@ -7,7 +7,10 @@ from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, relationship,
 
 from statuspage.config import DATABASE_URL
 
-engine = create_engine(DATABASE_URL)
+# プールは接続を再利用するため、待機中に DB が再起動すると次の使用時まで気づかず、最初のリクエストが失敗する。
+# Phase 3 の RDS 再起動・フェイルオーバーに備え、pool_pre_ping で貸し出し前に軽量な確認を送り、切断済みなら再接続する。
+# 確認のために小さな追加の往復通信が発生する。
+engine = create_engine(DATABASE_URL, pool_pre_ping=True)
 SessionLocal = sessionmaker(engine)
 
 
