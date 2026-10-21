@@ -1,8 +1,9 @@
 [Unit]
 Description=Statuspage API
-# Compose の depends_on に相当する起動順序。ただし DB の正常性までは確認しない。
-After=network-online.target postgresql.service
-Wants=network-online.target postgresql.service
+# DB の配置先に依存させず、同一サーバーの PostgreSQL（Phase 2）の起動順序・起動要求は
+# local-postgres.conf で追加する。RDS（Phase 3 以降）ではドロップインは不要。
+After=network-online.target
+Wants=network-online.target
 
 [Service]
 Type=exec
