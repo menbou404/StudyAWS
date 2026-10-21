@@ -269,7 +269,7 @@ unset APP_PASSWORD
 
 3. ポリシー名 `statuspage-read-db-secrets` →「ポリシーの作成」
 
-- アカウントID はコンソール右上のメニューで確認できる
+- アカウントID は、2行目に貼るマスター認証情報の ARN の中（`ap-southeast-2:` の後ろの12桁）からコピーすると打ち間違えない
 - `??????` は、AWS がシークレットの名前の後ろに付けるランダムな6文字
 - マスター認証情報（2つ目）は、手順7〜8の管理作業のためだけに一時的に付ける。手順12で外す
 - 実際のアカウントID や ARN を書いたポリシーは、リポジトリには入れない
@@ -340,6 +340,7 @@ PGPASSWORD="$APP_PASSWORD" psql -h "$DB_HOST" -U statuspage -d statuspage -c "SE
 | 7 | アプリ用のユーザーで接続できるか確かめる |
 
 - `-v ON_ERROR_STOP=1` は「エラーが出たら、そこで止まる」
+- 1行目で `AccessDeniedException`（`no identity-based policy allows ...`）になったら、手順6のポリシーの1つ目の ARN（アカウントID）を確認する
 - `CREATE ROLE`、`GRANT ROLE`、`CREATE DATABASE` と表示されれば OK
 
 - [ ] 完了
