@@ -365,12 +365,14 @@ cat /etc/statuspage.env                                            # 一般ユ�
 > 📖 **先に読む**
 > - [study §9 systemd](phase2-study.md#9-systemd)：「Phase 1 との対応」「よく使うコマンド」「起動の順番と依存」
 > 
-> 読んだら考える：`deploy/ec2/*.service` の各行は、`compose.yaml` のどの行に相当するか
+> 読んだら考える：`deploy/ec2/*.service` の各行は、`compose.yaml` のどの行に相当するか。`depends_on` に相当する設定は、どのファイルにあるか
 
-`deploy/ec2/statuspage-api.service` と `statuspage-worker.service` を読む（各行の意味と、Phase 1 の `compose.yaml` との対応がコメントにある）。そのうえで：
+`deploy/ec2/statuspage-api.service`・`statuspage-worker.service`・`local-postgres.conf` を読む（各行の意味と、Phase 1 の `compose.yaml` との対応がコメントにある）。そのうえで：
 
 ```bash
 sudo cp /opt/statuspage/deploy/ec2/statuspage-api.service /opt/statuspage/deploy/ec2/statuspage-worker.service /etc/systemd/system/
+sudo install -D -m 644 /opt/statuspage/deploy/ec2/local-postgres.conf /etc/systemd/system/statuspage-api.service.d/local-postgres.conf
+sudo install -D -m 644 /opt/statuspage/deploy/ec2/local-postgres.conf /etc/systemd/system/statuspage-worker.service.d/local-postgres.conf
 sudo systemctl daemon-reload
 sudo systemctl enable --now statuspage-api statuspage-worker
 systemctl status statuspage-api statuspage-worker --no-pager
@@ -383,6 +385,9 @@ curl -s localhost:8000/healthz
 sudo journalctl -u statuspage-worker -f
 ```
 
+- `local-postgres.conf` は **ドロップイン**（既存のサービス定義に、設定を後から足すファイル）。「PostgreSQL の後に起動し、PostgreSQL も一緒に起動する」を足す。サービス定義そのものは DB の場所を前提にしない作りにしてあり、DB が同じサーバーにある Phase 2 だけ、この依存を足す（Phase 3 で RDS に移ったら外す）
+- `install -D -m 644` は「コピー先のフォルダがなければ作り、権限を `644` にしてコピーする」
+- `systemctl cat statuspage-api` で、サービス定義とドロップインを合わせた中身を確認できる
 - `daemon-reload`：systemd に「設定ファイルを読み直して」と伝える
 - `status` の `Active: active (running)` が動いている状態
 - `journalctl` は systemd が集めたログを見るコマンド（Phase 1 の `docker compose logs` に相当）。サービスのログはシステムのログなので、`ssm-user` では `sudo` が必要（付けないと `You are currently not seeing messages from other users and the system` と出て何も表示されない）

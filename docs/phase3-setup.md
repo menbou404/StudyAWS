@@ -432,7 +432,7 @@ systemctl is-active postgresql
 
 考えること：
 
-- 2行目と4行目の結果は同じか。違うなら、なぜか（ヒント：`deploy/ec2/statuspage-api.service` の `[Unit]`）
+- 2行目と4行目の結果は同じか。違うなら、なぜか（ヒント：`systemctl cat statuspage-api` で、サービス定義とドロップインを合わせた中身を見る）
 
 結果を確かめたら、次を実行する。
 
@@ -447,6 +447,22 @@ curl -s localhost/healthz
 
 - `disable` と `mask` は何が違うか
 - EC2 の PostgreSQL が止まっていても、アプリが動くのはなぜか
+
+最後に、PostgreSQL を引き連れる原因そのもの（Phase 2 で入れたドロップイン）を外す。
+
+```bash
+sudo rm /etc/systemd/system/statuspage-api.service.d/local-postgres.conf /etc/systemd/system/statuspage-worker.service.d/local-postgres.conf
+sudo systemctl daemon-reload
+systemctl cat statuspage-api
+systemctl show -p Wants -p After statuspage-api
+```
+
+- `Wants=` と `After=` から `postgresql.service` が消えていれば OK
+- Phase 2 を古い版の手順で行い、サービス定義（`statuspage-api.service`）そのものに `postgresql.service` が書いてある場合は、ドロップインはないので `rm` は「No such file」になる。その場合は `mask` だけでよい（この EC2 は手順16で終了し、Phase 4 では新しい版のサービス定義を使う）
+
+考えること：
+
+- `mask` と、依存を外すことは、それぞれ何を防いでいるか。どちらが根本的な対処か
 
 - [ ] 完了
 

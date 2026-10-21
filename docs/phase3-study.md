@@ -330,7 +330,7 @@ SELECT ssl, version FROM pg_stat_ssl WHERE pid = pg_backend_pid();
 
 ### Wants と After
 
-Phase 2 の `.service` には `After=postgresql.service` と `Wants=postgresql.service` が書いてある。
+Phase 2 では、ドロップイン `local-postgres.conf` で、api と worker に `After=postgresql.service` と `Wants=postgresql.service` を足していた（[phase2-study §9](phase2-study.md#9-systemd) の「ドロップイン」）。
 
 | 設定 | 意味 |
 |---|---|
@@ -349,6 +349,16 @@ Phase 2 の `.service` には `After=postgresql.service` と `Wants=postgresql.s
 | `systemctl unmask` | `mask` を元に戻す |
 
 `mask --now` は、止める + mask を一度に行う。もう使わないが、パッケージは消したくないサービスに使う。
+
+### mask と、依存を外すこと
+
+| 対処 | 防ぐもの | 残る問題 |
+|---|---|---|
+| `mask postgresql` | PostgreSQL が起動すること（誰が頼んでも） | api と worker は、もう使わない PostgreSQL を **起動しようとし続ける**（失敗しても自分は起動するので、動作に影響はない） |
+| ドロップインを消す | api と worker が PostgreSQL を **引き連れようとすること** | なし |
+
+- 根本的な対処は「使わなくなった依存を外す」。`mask` は「どこから頼まれても起動させない」ための保険
+- サービス定義に DB の場所を書かず、DB が同じサーバーにある構成だけドロップインで依存を足しておくと、DB を移したときにドロップインを消すだけで済む
 
 ---
 

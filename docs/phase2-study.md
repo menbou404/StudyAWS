@@ -503,6 +503,20 @@ Phase 1 で直した「SIGTERM を受けたら区切りのよいところで終�
 
 Compose の `depends_on` と同じく、**起動のときの順番** を決めるだけ。起動後に PostgreSQL が落ちたら、アプリ側で備える（Phase 1 の §7）。
 
+### ドロップイン（設定を後から足す）
+
+サービス定義（`*.service`）を書き換えずに、設定を足したり上書きしたりするファイル。`/etc/systemd/system/<サービス名>.service.d/` に `*.conf` を置くと、systemd が元の定義と合わせて読み込む。
+
+| ファイル | 中身 | 置く場所 |
+|---|---|---|
+| `statuspage-api.service` | アプリの起動方法。**DB がどこにあるかは前提にしない** | `/etc/systemd/system/` |
+| `local-postgres.conf`（ドロップイン） | `After=postgresql.service`、`Wants=postgresql.service` | `/etc/systemd/system/statuspage-api.service.d/`（worker も同様） |
+
+- DB が同じサーバーにある構成（このPhase）だけ、ドロップインで依存を足す。DB を別のサーバー（Phase 3 の RDS）に移したら、ドロップインを消すだけで済み、サービス定義は変えなくてよい
+- `systemctl cat <サービス名>` で、元の定義とドロップインを合わせた中身を表示できる
+- 変更したら `systemctl daemon-reload` で読み直させる
+- `sudo systemctl edit <サービス名>` は、ドロップインを作って編集するためのコマンド
+
 ---
 
 ## 10. nginx とリバースプロキシ
