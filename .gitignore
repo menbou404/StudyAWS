@@ -17,6 +17,8 @@ __pycache__/
 # Node / CDK
 node_modules/
 cdk.out/
+# CDK が AWS に問い合わせた結果のキャッシュ（アカウントID が入るので公開しない）
+cdk.context.json
 
 # 個人の学習ログ（GitHub に上げない）
 docs/log/

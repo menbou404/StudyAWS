@@ -51,8 +51,15 @@ docker compose up --build   # リポジトリ直下で、3つのコンテナを�
 
 ## IaC（Phase 5 以降）
 
-- AWS CDK（TypeScript）で書く
-- リージョンは `ap-southeast-2`。アカウントID はコードに書かず、環境から取る
+- AWS CDK（TypeScript）で書く。場所は `infra/`（`bin/`、`lib/`、`test/`）。`aws-cdk-lib` と CDK CLI（`aws-cdk`）は `infra/package.json` で固定し、`package-lock.json` もコミットする
+- リージョンは `ap-southeast-2`。アカウントID はコードに書かず、`CDK_DEFAULT_ACCOUNT` から取る
+- スタックはライフサイクルで分ける：`StatuspageNetwork`（VPC・SG）/ `StatuspageDatabase`（RDS）/ `StatuspageApp`（IAM・起動テンプレート・ALB・ASG）。App は毎日 `cdk destroy` されても、DB のデータが残るようにする
+- 物理名は、ほかの仕組みが名前で探すものにだけ付ける（RDS の識別子 `statuspage-db`、シークレット `statuspage/db-app`）。それ以外は CDK に任せる
+- 秘密や環境ごとの値をコードに書かない。自分の IP アドレスは `-c allowedCidrs=a/32,b/32` で受け取り、未指定なら ALB に受信ルールを作らない。`cdk.context.json` は `.gitignore` 済み（アカウントID が入るため）
+- ユーザーデータは `deploy/ec2/user-data.sh` を読み込んで使う（worker 用は `ROLE="api"` を置き換える）。スクリプトをコードの中に複製しない
+- 既存のリソースを使う：シークレット `statuspage/db-app` は参照する（作らない）。RDS はスナップショット `statuspage-db-phase4-final` から作り、削除ポリシーは SNAPSHOT
+- 各リソースの近くに、Phase 2〜4 のどの手作業に当たるかを日本語のコメントで書く（学習用）
+- `infra/test/` に `aws-cdk-lib/assertions` のテストを書き、`npm test` で通ることを確認する（DB に受信できるのは web と worker の SG だけ、など守りたいルールを確かめる）
 
 ## 禁止事項
 

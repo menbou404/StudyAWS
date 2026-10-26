@@ -15,7 +15,7 @@
 | 2. EC2に手で載せる | nginx + systemd で常駐 | VPC, サブネット, セキュリティグループ, IAM ロール, Session Manager | ✅ |
 | 3. DBを分離 | RDS (PostgreSQL) をプライベートサブネットへ | パブリック/プライベート設計, RDS, Secrets Manager | ✅ |
 | 4. 冗長化 | ALB + Auto Scaling（独自ドメイン + HTTPS は付録） | ロードバランサー, マルチAZ, 起動テンプレート, ユーザーデータ | 🚧 |
-| 5. コード化 | ここまでの構成を AWS CDK (TypeScript) で再現 | IaC | |
+| 5. コード化 | ここまでの構成を AWS CDK (TypeScript) で再現 | IaC, CloudFormation, CDK | |
 | 6. CI/CD | GitHub Actions でテスト・自動デプロイ | GitHub Actions, OIDC | |
 | 7. コンテナ化 | ECR + ECS Fargate | コンテナオーケストレーション | |
 | 8. サーバーレス化 | Lambda + EventBridge, S3 + CloudFront | サーバーレス, コスト比較 | |
@@ -38,6 +38,7 @@
 - Phase 2: [手順書](docs/phase2-setup.md) / [知識まとめ](docs/phase2-study.md) / [付録](docs/phase2-appendix.md)
 - Phase 3: [手順書](docs/phase3-setup.md) / [知識まとめ](docs/phase3-study.md) / [付録](docs/phase3-appendix.md)
 - Phase 4: [手順書](docs/phase4-setup.md) / [知識まとめ](docs/phase4-study.md) / [付録](docs/phase4-appendix.md)
+- Phase 5: [手順書](docs/phase5-setup.md) / [知識まとめ](docs/phase5-study.md) / [付録](docs/phase5-appendix.md)
 
 ## 環境
 
