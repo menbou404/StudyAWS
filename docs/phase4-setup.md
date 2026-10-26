@@ -300,7 +300,7 @@ statuspage-private-a (2a) / statuspage-private-b (2b)
 - 作った直後から、Auto Scaling が `statuspage-api-lt` を使ってインスタンスを2台起動する。インスタンスの一覧に、名前のないインスタンスが2台現れる（2a と 2b に1台ずつ）
 - ユーザーデータの実行（パッケージのインストール、`uv sync` など）に数分かかる。猶予期間の 300 秒は、その間にヘルスチェックで失敗と判断されないため
 
-- [ ] 完了
+- [x] 完了
 
 ## 8. worker の Auto Scaling グループを作る
 
