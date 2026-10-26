@@ -26,11 +26,12 @@
 
 | スタック | 中身 | Phase 2〜4 の手作業 |
 |---|---|---|
-| `StatuspageNetwork` | VPC（`10.1.0.0/16`、2つの AZ）、パブリックサブネット 2、プライベートサブネット 2、IGW、ルートテーブル、セキュリティグループ 4（alb・web・worker・db）とそのつながり | Phase 2 手順1・3、Phase 3 手順1・2、Phase 4 手順1・2 |
+| `StatuspageNetwork` | VPC（`10.1.0.0/16`、2つの AZ）、パブリックサブネット 2、プライベートサブネット 2、IGW、ルートテーブル、DB 用のセキュリティグループ（受信ルールなし） | Phase 2 手順1、Phase 3 手順1・2、Phase 4 手順1 |
 | `StatuspageDatabase` | DB サブネットグループ、RDS `statuspage-db`（スナップショット `statuspage-db-phase4-final` から作る。マスターのパスワードは新しいシークレットに保存）、削除ポリシー SNAPSHOT | Phase 3 手順3・4 |
-| `StatuspageApp` | EC2 用の IAM ロール、起動テンプレート 2（ユーザーデータは `deploy/ec2/user-data.sh`）、ターゲットグループ、ALB、Auto Scaling グループ 2 | Phase 2 手順2、Phase 3 手順6、Phase 4 手順3〜8 |
+| `StatuspageApp` | セキュリティグループ 3（alb・web・worker）と、DB への 5432番を許可するルール、EC2 用の IAM ロール、起動テンプレート 2（ユーザーデータは `deploy/ec2/user-data.sh`）、ターゲットグループ、ALB、Auto Scaling グループ 2 | Phase 2 手順2・3、Phase 3 手順6、Phase 4 手順2〜8 |
 
 - アプリ用のシークレット `statuspage/db-app` は、Phase 3 で手で作ったものを **参照する**（CDK では作らない）
+- ALB・web・worker のセキュリティグループと、DB への受信ルールは、アプリのスタックに置く。ALB のルールにはデプロイのたびに渡す IP が入るので、ネットワークのスタックをそのたびにデプロイし直さなくて済む。アプリのスタックを消すと DB への受信ルールも消え、アプリがない間は誰も DB に入れない
 - VPC は、手で作った `10.0.0.0/16` と見分けるため `10.1.0.0/16` にする。サブネットの CIDR は CDK に割り当てさせる
 - ALB に入れる自分の IP アドレスは、コードに書かず、デプロイのときに `-c allowedCidrs=...` で渡す。渡さなければ、ALB には誰も入れない
 
@@ -170,9 +171,9 @@ npx cdk bootstrap --profile study
 | ファイル | 中身 |
 |---|---|
 | `bin/statuspage.ts` | App。3つのスタックを作り、つなげる |
-| `lib/network-stack.ts` | VPC とセキュリティグループ |
+| `lib/network-stack.ts` | VPC と DB 用のセキュリティグループ |
 | `lib/database-stack.ts` | RDS（スナップショットから） |
-| `lib/app-stack.ts` | IAM ロール、起動テンプレート、ALB、Auto Scaling グループ |
+| `lib/app-stack.ts` | セキュリティグループ（alb・web・worker、DB への受信ルール）、IAM ロール、起動テンプレート、ALB、Auto Scaling グループ |
 | `test/` | テンプレートを確かめるテスト |
 
 確かめること：
@@ -287,9 +288,9 @@ npx cdk deploy StatuspageApp --profile study -c allowedCidrs="$MYIP/32"
 
 予想してから実行する。
 
-1. コンソールで、CDK が作った ALB のセキュリティグループ（名前に `StatuspageNetwork` と `Alb` を含むもの）に、インバウンドルールを1つ手で足す（タイプ「カスタム TCP」、ポート 8080、ソース「マイ IP」、説明 `drift test`）
-2. `npx cdk diff StatuspageNetwork --profile study` を実行する
-3. CloudFormation のコンソールで `StatuspageNetwork` を選び、「スタックアクション」→「ドリフトの検出」→ 終わったら「ドリフト結果を表示」
+1. コンソールで、CDK が作った ALB のセキュリティグループ（名前に `StatuspageApp` と `Alb` を含むもの）に、インバウンドルールを1つ手で足す（タイプ「カスタム TCP」、ポート 8080、ソース「マイ IP」、説明 `drift test`）
+2. `npx cdk diff StatuspageApp --profile study -c allowedCidrs=...` を実行する
+3. CloudFormation のコンソールで `StatuspageApp` を選び、「スタックアクション」→「ドリフトの検出」→ 終わったら「ドリフト結果を表示」
 4. 手で足したルールを、コンソールで消す
 
 考えること：
