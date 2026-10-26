@@ -130,10 +130,10 @@ statuspage-private-a (2a) / statuspage-private-b (2b)
 
 - 別の場所から学習するときは、`statuspage-alb-sg` にその場所のルールを追加する（[phase2-setup.md](phase2-setup.md) の手順15と同じ考え方。対象が `statuspage-web-sg` から `statuspage-alb-sg` に変わる）
 
-- [ ] `statuspage-alb-sg`
-- [ ] `statuspage-worker-sg`
-- [ ] `statuspage-web-sg` のソースを `statuspage-alb-sg` に変更
-- [ ] `statuspage-db-sg` に `statuspage-worker-sg` からのルールを追加
+- [x] `statuspage-alb-sg`
+- [x] `statuspage-worker-sg`
+- [x] `statuspage-web-sg` のソースを `statuspage-alb-sg` に変更
+- [x] `statuspage-db-sg` に `statuspage-worker-sg` からのルールを追加
 
 ## 3. EC2 のロールに、RDS の接続先を調べる権限を足す
 
