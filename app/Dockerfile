@@ -2,7 +2,7 @@
 FROM python:3.13-slim
 
 # 2 uvの実行ファイルのコピー
-COPY --from=ghcr.io/astral-sh/uv:0.11.21 /uv /usr/local/bin/uv
+COPY --from=ghcr.io/astral-sh/uv:0.13.5 /uv /usr/local/bin/uv
 
 # 3 以降の作業場所(コンテナ内のフォルダ)
 WORKDIR /app

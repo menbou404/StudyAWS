@@ -260,12 +260,12 @@ systemctl list-unit-files 'postgresql*'     # サービス名が postgresql.serv
 
 ```bash
 sudo useradd --system --create-home --home-dir /var/lib/statuspage --shell /sbin/nologin statuspage
-curl -LsSf https://astral.sh/uv/0.11.21/install.sh | sudo env UV_INSTALL_DIR=/usr/local/bin UV_NO_MODIFY_PATH=1 sh
+curl -LsSf https://astral.sh/uv/0.13.5/install.sh | sudo env UV_INSTALL_DIR=/usr/local/bin UV_NO_MODIFY_PATH=1 sh
 /usr/local/bin/uv --version
 ```
 
 - `statuspage` はアプリを動かす専用のユーザー。ログインはできない（`/sbin/nologin`）。Phase 1 の Dockerfile の `appuser` に相当
-- uv は Dockerfile と同じバージョンを、全ユーザーが使える `/usr/local/bin` に入れる
+- uv は Dockerfile と同じバージョンを、全ユーザーが使える `/usr/local/bin` に入れる。バージョンは Dockerfile・`deploy/ec2/user-data.sh` と同じものにそろえる（新しいバージョンに上げるときは3か所を一緒に変える）
 - `sudo` で動かすコマンドからは `/usr/local/bin` が見えないことがあるので、以降は `/usr/local/bin/uv` と書く
 
 - [x] 完了

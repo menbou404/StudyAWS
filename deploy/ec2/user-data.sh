@@ -20,8 +20,8 @@ SECRET_ID="statuspage/db-app"
 REPO_URL="https://github.com/menbou404/StudyAWS.git"
 # 配置するコードの取得元をそろえる。
 REPO_BRANCH="main"
-# Phase 2 と同じバージョンに固定してインストール結果をそろえる。
-UV_VERSION="0.11.21"
+# app/Dockerfile と同じバージョンに固定してインストール結果をそろえる。更新するときは Dockerfile・手順書と一緒に変える。
+UV_VERSION="0.13.5"
 
 case "$ROLE" in
     api|worker) ;;

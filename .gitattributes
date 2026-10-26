@@ -1,0 +1,2 @@
+# EC2（Linux）で実行するスクリプトは、Windows で取り出しても改行コードを LF のままにする（CRLF だと bash が動かない）
+*.sh text eol=lf

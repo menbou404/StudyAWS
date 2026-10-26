@@ -121,7 +121,7 @@ python:3.13-slim                  ← 土台のイメージ
 | # | 命令 | 意味・理由 |
 |---|---|---|
 | 1 | `FROM python:3.13-slim` | 土台のイメージ。`slim` は不要なパッケージを削った軽量版（Debian ベース） |
-| 2 | `COPY --from=ghcr.io/astral-sh/uv:0.11.21 /uv /usr/local/bin/uv` | 別のイメージから uv の実行ファイルだけを持ってくる。バージョンを固定して、いつビルドしても同じ結果にする |
+| 2 | `COPY --from=ghcr.io/astral-sh/uv:0.13.5 /uv /usr/local/bin/uv` | 別のイメージから uv の実行ファイルだけを持ってくる。バージョンを固定して、いつビルドしても同じ結果にする |
 | 3 | `WORKDIR /app` | 以降の作業フォルダ（なければ作られる） |
 | 4 | `RUN useradd --create-home appuser` | root ではない一般ユーザーを作る |
 | 5 | `COPY pyproject.toml uv.lock ./` → `RUN uv sync --locked --no-dev` | ライブラリだけ先に入れる（キャッシュのため）。`--locked`：`uv.lock` と食い違っていたら失敗させる。`--no-dev`：pytest などテスト用は入れない |

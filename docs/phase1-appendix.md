@@ -56,7 +56,7 @@ ECS のタスク定義にも同じ機能（`initProcessEnabled`）がある。
 ```dockerfile
 # ステージ1：ビルド用（コンパイラなど、重い道具がそろっている）
 FROM python:3.13 AS builder
-COPY --from=ghcr.io/astral-sh/uv:0.11.21 /uv /usr/local/bin/uv
+COPY --from=ghcr.io/astral-sh/uv:0.13.5 /uv /usr/local/bin/uv
 WORKDIR /app
 COPY pyproject.toml uv.lock ./
 RUN uv sync --locked --no-dev

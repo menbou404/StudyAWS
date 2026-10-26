@@ -41,6 +41,7 @@ docker compose up --build   # リポジトリ直下で、3つのコンテナを�
   - `/healthz` は DB を確認しない（浅いヘルスチェック）
 - worker は SIGTERM で今の回を終えてから正常終了する。長い待機は `time.sleep` ではなく `stop.wait(timeout=...)` を使う
 - Dockerfile は exec 形式の `CMD`、一般ユーザー（`appuser`）で実行、変わりにくいものを上に書く
+- uv のバージョンは `app/Dockerfile` と `deploy/ec2/user-data.sh` でそろえる（脆弱性への対応のため、新しいバージョンに追従する。上げるときは両方と `docs/phase2-setup.md` を一緒に変える）
 
 ## テストの書き方
 
