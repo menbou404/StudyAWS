@@ -427,7 +427,7 @@ while ($true) { try { $r = Invoke-WebRequest -UseBasicParsing -TimeoutSec 3 http
 - このインスタンスは最後にどうなったか。それはどの設定のおかげか
 - もし手順7でヘルスチェックを「EC2」だけにしていたら、どうなっていたか
 
-- [ ] 完了
+- [x] 完了
 
 ## 13. 実験D：台数を変える
 
