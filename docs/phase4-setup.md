@@ -447,7 +447,7 @@ while ($true) { try { $r = Invoke-WebRequest -UseBasicParsing -TimeoutSec 3 http
 - 2に戻したとき、どのインスタンスが終了したか。終了する前に何が起きたか（手元のアクセスにエラーは出たか）
 - 5にしようとすると、どうなったか
 
-- [ ] 完了
+- [x] 完了
 
 ## 14. 実験E：worker を終了する
 
