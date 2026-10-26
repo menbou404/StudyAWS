@@ -407,7 +407,7 @@ while ($true) { try { $r = Invoke-WebRequest -UseBasicParsing -TimeoutSec 3 http
 - 何分後に、何が起きたか（アクティビティの記録）
 - 人が何もしなくても、台数が2台に戻ったのはなぜか
 
-- [ ] 完了
+- [x] 完了
 
 ## 12. 実験C：ヘルスチェックを失敗させる
 
