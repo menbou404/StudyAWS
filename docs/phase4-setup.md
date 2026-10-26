@@ -267,8 +267,8 @@ statuspage-private-a (2a) / statuspage-private-b (2b)
 - 起動テンプレートを作っただけでは、インスタンスは起動しない（料金はかからない）
 - ユーザーデータは、インスタンスの **初回起動時に1回だけ** 実行される
 
-- [ ] `statuspage-api-lt`
-- [ ] `statuspage-worker-lt`（セキュリティグループと `ROLE` を変えた）
+- [x] `statuspage-api-lt`
+- [x] `statuspage-worker-lt`（セキュリティグループと `ROLE` を変えた）
 
 ## 7. api の Auto Scaling グループを作る
 
