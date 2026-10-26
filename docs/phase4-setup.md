@@ -159,7 +159,7 @@ statuspage-private-a (2a) / statuspage-private-b (2b)
 - `Statement` はリスト（`[ ... ]`）なので、既にある `{ ... }` の後ろに `,` を付けてから追加する
 - `rds:DescribeDBInstances` は「DB の情報を見る」だけの権限。DB を変えたり消したりはできない
 
-- [ ] 完了
+- [x] 完了
 
 ## 4. ターゲットグループを作る
 
