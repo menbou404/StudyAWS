@@ -489,7 +489,7 @@ while ($true) { try { $r = Invoke-WebRequest -UseBasicParsing -TimeoutSec 3 http
 
 - ALB を作り直しても、Auto Scaling グループはターゲットグループに登録しているので、設定を変えなくてよい
 
-- [ ] 理解した
+- [x] 理解した
 
 ## 16. Phase 4 の片付け
 

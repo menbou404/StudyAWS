@@ -378,7 +378,8 @@ browser ──HTTPS(443)──▶ ALB ──HTTP(80)──▶ EC2
 
 - 証明書の管理（更新）を ALB と ACM に任せられる。EC2 に証明書を置かなくてよい
 - ALB から EC2 までは VPC の中の通信。さらに暗号化したい場合は、EC2 でも HTTPS にする
-- アプリから見ると、すべて HTTP で届く。元が HTTPS だったかは、`X-Forwarded-Proto` ヘッダーで分かる（nginx の設定で、アプリに渡している）
+- アプリから見ると、すべて HTTP で届く。元が HTTPS だったかは、ALB が付ける `X-Forwarded-Proto` ヘッダーで分かる
+- ALB とアプリの間にもう1段プロキシ（nginx）があるときは、そのプロキシが ALB のヘッダーを **そのまま** 渡す必要がある。nginx で `proxy_set_header X-Forwarded-Proto $scheme;` と書くと、`$scheme` は「nginx が受け取ったときのプロトコル」（ALB の後ろでは常に `http`）なので、ALB の値を上書きしてしまう。ALB の後ろでは `$http_x_forwarded_proto`（受け取ったヘッダーの値）を渡す
 
 ---
 
