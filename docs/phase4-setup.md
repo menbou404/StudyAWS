@@ -223,8 +223,8 @@ statuspage-private-a (2a) / statuspage-private-b (2b)
 - 有料のオプション（AWS WAF、Global Accelerator など）が表示されても、有効にしない
 - この時点ではターゲットがいないので、ブラウザで開くと **503** になる
 
-- [ ] ALB が「アクティブ」
-- [ ] DNS 名をメモした
+- [x] ALB が「アクティブ」
+- [x] DNS 名をメモした
 
 ## 6. 起動テンプレートを作る
 
