@@ -258,7 +258,7 @@ statuspage-private-a (2a) / statuspage-private-b (2b)
 
 ### 6-2. worker 用
 
-1. 「起動テンプレート」の一覧で `statuspage-api-lt` を選ぶ →「アクション」→「テンプレートに基づいて作成」（または、6-1 と同じ手順で新しく作る）
+1. 「起動テンプレートを作成」→ 画面上部の **「ソーステンプレート」** で `statuspage-api-lt` を選ぶ（api 用の設定がコピーされる。見当たらなければ、6-1 と同じ手順で新しく作る）
 2. 起動テンプレート名 `statuspage-worker-lt`、説明 `worker v1`
 3. セキュリティグループを **`statuspage-worker-sg`** に変える
 4. ユーザーデータの先頭近くの `ROLE="api"` を **`ROLE="worker"`** に変える
