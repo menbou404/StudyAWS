@@ -90,7 +90,7 @@ statuspage-private-a (2a) / statuspage-private-b (2b)
 3. Budgets の月次コスト予算が有効か確認する
 4. AWS Settings の請求画面で、クレジットの残高を確認する
 
-- [ ] 完了
+- [x] 完了
 
 ## 1. 2つ目のパブリックサブネットを作る
 
