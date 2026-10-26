@@ -465,7 +465,7 @@ while ($true) { try { $r = Invoke-WebRequest -UseBasicParsing -TimeoutSec 3 http
 - 監視が止まっていたのは、どのくらいの時間か。その間の記録はどうなったか
 - worker の希望するキャパシティを 2 にしたら、何が困るか
 
-- [ ] 完了
+- [x] 完了
 
 ## 15. 毎回の終わりに
 
