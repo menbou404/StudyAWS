@@ -343,9 +343,9 @@ sudo journalctl -u statuspage-worker -n 5 --no-pager
 - `cloud-init-output.log` の最後に `statuspage user-data done: role=worker` と出ていれば、ユーザーデータが最後まで実行された
 - ターゲットが Healthy にならないときは、api のインスタンスに入って `sudo tail -n 50 /var/log/cloud-init-output.log` でユーザーデータのエラーを探す
 
-- [ ] 2台が Healthy
-- [ ] ブラウザで表示された
-- [ ] worker のログで監視が動いている
+- [x] 2台が Healthy
+- [x] ブラウザで表示された
+- [x] worker のログで監視が動いている
 
 ## 10. 実験A：ALB はどう振り分けるか
 
