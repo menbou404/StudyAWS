@@ -244,6 +244,7 @@ npx cdk deploy StatuspageApp --profile study -c allowedCidrs="$MYIP/32"
 
 - 複数の場所から使うときは、`allowedCidrs="a.a.a.a/32,b.b.b.b/32"` のようにカンマでつなぐ
 - `deploy` の最後に **Outputs** として ALB の DNS 名が表示される（チャットやリポジトリには貼らない）
+- `diff` や `deploy` で `WARNING desiredCapacity has been configured` が Auto Scaling グループごとに出る。「コードに希望するキャパシティを書いているので、デプロイのたびにその台数に戻す」という注意で、このプロジェクトでは意図どおり（[study §11 ドリフト](phase5-study.md#11-ドリフト)）
 
 - [ ] ネットワークと DB
 - [ ] アプリ
