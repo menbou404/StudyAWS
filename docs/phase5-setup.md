@@ -53,7 +53,7 @@
 2. Budgets の月次コスト予算と、クレジットの残高を確認する
 3. Phase 4 の構成が、手順15（毎回の終わり）の状態か確認する（Auto Scaling グループが0台、RDS が停止）
 
-- [ ] 完了
+- [x] 完了
 
 ## 1. 手で作った構成を片付ける（DB はスナップショットを残す）
 
@@ -74,8 +74,8 @@ CDK で同じ名前のもの（RDS の `statuspage-db` など）を作るので�
 - RDS が停止中でも削除できる。削除と同時に、RDS が管理していたマスターのシークレット（`rds!db-xxxx`）も削除される
 - シークレット `statuspage/db-app` は **消さない**
 
-- [ ] Auto Scaling グループ・ALB・ターゲットグループを削除
-- [ ] スナップショット `statuspage-db-phase4-final` が利用可能
+- [x] Auto Scaling グループ・ALB・ターゲットグループを削除
+- [x] スナップショット `statuspage-db-phase4-final` が利用可能
 
 ## 2. Node.js と CDK を用意する
 
@@ -105,7 +105,7 @@ npx cdk --version
 - `npm ci` は、`package-lock.json` に書かれたとおりのバージョンでライブラリを入れる（Phase 1 の `uv sync --locked` に相当）
 - `npx cdk` は、`infra/` に入れた CDK CLI を使う。PC ごと・人ごとにバージョンが違う、ということが起きない
 
-- [ ] 完了
+- [x] 完了
 
 ## 3. CDK から AWS につながるか確かめる
 
@@ -140,7 +140,7 @@ npx cdk ls
 - 書き出した認証情報は期限付き。エラーが出たら、`aws login` からやり直す
 - 書き出した値は、その PowerShell・ターミナルの中だけで使われる。閉じれば消える。画面に表示したり、どこかに貼ったりしない
 
-- [ ] 完了
+- [x] 完了
 
 ## 4. ブートストラップする
 
@@ -155,7 +155,7 @@ npx cdk bootstrap --profile study
 
 - CloudFormation のコンソールに、`CDKToolkit` というスタックができる。中身（「リソース」タブ）を見て、S3 バケット・ECR リポジトリ・IAM ロールがあることを確認する
 
-- [ ] 完了
+- [x] 完了
 
 ## 5. コードを読む
 
@@ -182,7 +182,7 @@ npx cdk bootstrap --profile study
 - Phase 3 手順6・Phase 4 手順3 で手で書いた IAM のインラインポリシーは、どう書かれているか
 - ユーザーデータの `ROLE="api"` は、worker 用ではどうやって変えているか
 
-- [ ] 完了
+- [x] 完了
 
 ## 6. テンプレートを作って読む（synth）
 
@@ -200,7 +200,7 @@ npm test
 - コードに書いていないのに作られているリソースはあるか。それは何のためか
 - `network.yaml` は確認が終わったら消す（Git に入れない）
 
-- [ ] 完了
+- [x] 完了
 
 ## 7. デプロイする
 
@@ -246,8 +246,8 @@ npx cdk deploy StatuspageApp --profile study -c allowedCidrs="$MYIP/32"
 - `deploy` の最後に **Outputs** として ALB の DNS 名が表示される（チャットやリポジトリには貼らない）
 - `diff` や `deploy` で `WARNING desiredCapacity has been configured` が Auto Scaling グループごとに出る。「コードに希望するキャパシティを書いているので、デプロイのたびにその台数に戻す」という注意で、このプロジェクトでは意図どおり（[study §11 ドリフト](phase5-study.md#11-ドリフト)）
 
-- [ ] ネットワークと DB
-- [ ] アプリ
+- [x] ネットワークと DB
+- [x] アプリ
 
 ## 8. 動いていることを確かめる
 
@@ -260,7 +260,7 @@ npx cdk deploy StatuspageApp --profile study -c allowedCidrs="$MYIP/32"
 2. 最終チェックの時刻が、1分ごとに新しくなることを確認する（worker が動いている）
 3. CloudFormation のコンソールで、3つのスタックが `CREATE_COMPLETE` になっていることと、各スタックの「リソース」タブの数を見る
 
-- [ ] 完了
+- [x] 完了
 
 ## 9. 実験A：コードを変えて差分を見る
 
@@ -280,7 +280,7 @@ npx cdk deploy StatuspageApp --profile study -c allowedCidrs="$MYIP/32"
 - 同じ `deploy` を、何も変えずにもう一度実行するとどうなるか
 - Phase 4 の実験D（コンソールで台数を変えた）と比べて、何がうれしいか
 
-- [ ] 完了
+- [x] 完了
 
 ## 10. 実験B：手で変えると、コードは気づくか
 
@@ -300,7 +300,7 @@ npx cdk deploy StatuspageApp --profile study -c allowedCidrs="$MYIP/32"
 - ドリフトの検出では、どう表示されたか
 - IaC で作ったリソースを手で変えてはいけないのは、なぜか
 
-- [ ] 完了
+- [x] 完了
 
 ## 11. 実験C：アプリのスタックを消して、作り直す
 
