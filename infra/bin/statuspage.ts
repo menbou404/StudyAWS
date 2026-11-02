@@ -4,6 +4,8 @@ import { AppStack } from '../lib/app-stack';
 import { DatabaseStack } from '../lib/database-stack';
 import { NetworkStack } from '../lib/network-stack';
 import { parseAllowedCidrs } from '../lib/allowed-cidrs';
+import { parseAppVersion } from '../lib/app-version';
+import { GithubStack } from '../lib/github-stack';
 
 const app = new App();
 const env = {
@@ -11,6 +13,9 @@ const env = {
   region: 'ap-southeast-2',
 };
 const allowedCidrs = parseAllowedCidrs(app.node.tryGetContext('allowedCidrs'));
+const appVersion = parseAppVersion(app.node.tryGetContext('appVersion'));
+// フォークした人は cdk.json の githubRepo を自分のリポジトリに書き換える。
+const githubRepo = app.node.tryGetContext('githubRepo');
 
 // Phase 2〜4 の構築を寿命ごとに分け、毎日の App 削除で DB を巻き込まない。
 const network = new NetworkStack(app, 'StatuspageNetwork', { env });
@@ -25,4 +30,8 @@ new AppStack(app, 'StatuspageApp', {
   dbSecurityGroup: network.dbSecurityGroup,
   database: database.instance,
   allowedCidrs,
+  appVersion,
 });
+
+// Phase 6：認証の基盤は手元から管理し、ほかのスタックと参照させない。
+new GithubStack(app, 'StatuspageGithub', { env, githubRepo });

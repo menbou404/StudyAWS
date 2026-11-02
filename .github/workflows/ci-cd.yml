@@ -1,0 +1,132 @@
+name: CI/CD
+
+on:
+  push:
+    branches: [main]
+    paths: ['app/**', 'infra/**', 'deploy/**', '.github/workflows/**']
+  pull_request:
+    paths: ['app/**', 'infra/**', 'deploy/**', '.github/workflows/**']
+  workflow_dispatch:
+
+# テストだけのジョブにはリポジトリの読み取り以外を渡さない。
+permissions:
+  contents: read
+
+jobs:
+  test-app:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: app
+    steps:
+      # ランナーは毎回まっさらなので、テストするコミットを配置する。
+      - uses: actions/checkout@v7.0.1
+      # EC2・Docker と同じ uv を使い、依存の解決方法をそろえる。
+      - uses: astral-sh/setup-uv@v10.3.3
+        with:
+          version: '0.13.5'
+      # ロックファイルとずれた依存を勝手に入れない。
+      - run: uv sync --locked
+      # AWS や本物の監視先に接続せず、アプリの動作を確かめる。
+      - run: uv run pytest
+
+  test-infra:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: infra
+    steps:
+      # app のテストとは別のランナーなので、ここでもコードを配置する。
+      - uses: actions/checkout@v7.0.1
+      # CDK の実行環境を固定し、キャッシュも infra のロックファイルに合わせる。
+      - uses: actions/setup-node@v7.1.0
+        with:
+          node-version: '24'
+          cache: npm
+          cache-dependency-path: infra/package-lock.json
+      # 手元と同じバージョンの依存だけを入れる。
+      - run: npm ci
+      # SG や IAM の制約を、AWS に変更を加える前に確かめる。
+      - run: npm test
+      # 認証情報や環境固有の context がなくてもテンプレートを生成できるようにする。
+      - run: npx cdk synth --quiet
+
+  deploy:
+    needs: [test-app, test-infra]
+    # ブランチの制限は環境 aws に任せ、実験Dでその保護を確かめられるようにする。
+    if: github.event_name != 'pull_request' && vars.DEPLOY_ENABLED == 'true'
+    runs-on: ubuntu-latest
+    environment: aws
+    permissions:
+      id-token: write
+      contents: read
+    # destroy とも直列化し、途中のローリング更新を取り消さない。
+    concurrency:
+      group: statuspage-aws
+      cancel-in-progress: false
+    defaults:
+      run:
+        working-directory: infra
+    steps:
+      # テストしたコミットと同じ CDK コードを使う。
+      - uses: actions/checkout@v7.0.1
+      # テストとデプロイで Node.js と依存の条件をそろえる。
+      - uses: actions/setup-node@v7.1.0
+        with:
+          node-version: '24'
+          cache: npm
+          cache-dependency-path: infra/package-lock.json
+      # ロックファイルを変更せずにデプロイ用の依存を入れる。
+      - run: npm ci
+      # カンマ区切りの秘密は全体しか自動マスクされないので、各 CIDR と IP も登録する。
+      - name: Mask allowed CIDRs
+        env:
+          ALLOWED_CIDRS: ${{ secrets.ALLOWED_CIDRS }}
+        shell: bash
+        run: |
+          IFS=',' read -r -a cidrs <<< "$ALLOWED_CIDRS"
+          for cidr in "${cidrs[@]}"; do
+            cidr="${cidr#"${cidr%%[![:space:]]*}"}"
+            cidr="${cidr%"${cidr##*[![:space:]]}"}"
+            if [[ -n "$cidr" ]]; then
+              printf '::add-mask::%s\n' "$cidr"
+              printf '::add-mask::%s\n' "${cidr%/*}"
+            fi
+          done
+      # 長期のアクセスキーを保存せず、環境 aws の OIDC トークンで一時認証する。
+      - uses: aws-actions/configure-aws-credentials@v6.3.0
+        with:
+          role-to-assume: ${{ secrets.AWS_ROLE_ARN }}
+          aws-region: ap-southeast-2
+          mask-aws-account-id: true
+      # push では学習中のスタックだけを更新する。不在以外の AWS エラーは失敗にする。
+      - name: Check app stack
+        id: app-stack
+        shell: bash
+        run: |
+          error_file="$RUNNER_TEMP/statuspage-describe-stacks.err"
+          if aws cloudformation describe-stacks --stack-name StatuspageApp \
+            --query 'Stacks[0].StackStatus' --output text > /dev/null 2> "$error_file"; then
+            printf 'deploy=true\n' >> "$GITHUB_OUTPUT"
+          elif grep -Fq 'Stack with id StatuspageApp does not exist' "$error_file"; then
+            if [[ "$GITHUB_EVENT_NAME" == 'push' ]]; then
+              printf '::notice::StatuspageApp がないため、自動デプロイをスキップします\n'
+              printf 'deploy=false\n' >> "$GITHUB_OUTPUT"
+            else
+              printf 'deploy=true\n' >> "$GITHUB_OUTPUT"
+            fi
+          else
+            printf '::error::StatuspageApp の確認に失敗しました\n'
+            exit 1
+          fi
+      # SHA で全インスタンスをそろえ、ALB の DNS 名は標準エラーも含めて公開前に伏せる。
+      - name: Deploy app
+        if: steps.app-stack.outputs.deploy == 'true'
+        env:
+          ALLOWED_CIDRS: ${{ secrets.ALLOWED_CIDRS }}
+        shell: bash
+        run: |
+          set -o pipefail
+          npx cdk deploy StatuspageApp --require-approval never \
+            -c allowedCidrs="$ALLOWED_CIDRS" -c appVersion="$GITHUB_SHA" 2>&1 \
+            | sed -E 's/[A-Za-z0-9-]+(\.[A-Za-z0-9-]+)*\.elb\.amazonaws\.com/[ALB DNS masked]/g'

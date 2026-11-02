@@ -2,6 +2,9 @@
 
 import os
 
+# Phase 6：どのコミットが動いているかを /healthz で確かめるため。
+APP_VERSION = os.environ.get("APP_VERSION", "dev")
+
 # 既定はローカル開発用の SQLite。Docker Compose / AWS では PostgreSQL の URL を渡す
 DATABASE_URL = os.environ.get("DATABASE_URL", "sqlite:///./dev.db")
 

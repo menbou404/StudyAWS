@@ -5,9 +5,11 @@ import { Match, Template } from 'aws-cdk-lib/assertions';
 import { AppStack } from '../lib/app-stack';
 import { DatabaseStack } from '../lib/database-stack';
 import { NetworkStack } from '../lib/network-stack';
+import { GithubStack } from '../lib/github-stack';
 
 const config = JSON.parse(readFileSync(path.join(__dirname, '../cdk.json'), 'utf8'));
 const allowedCidrs = ['203.0.113.10/32', '198.51.100.20/32'];
+const appVersion = '0123456789abcdef0123456789abcdef01234567';
 
 function createStacks(cidrs: string[] = []) {
   // 実行時と同じ feature flags を使い、アカウント情報や AWS lookup に依存させない。
@@ -25,8 +27,10 @@ function createStacks(cidrs: string[] = []) {
     dbSecurityGroup: network.dbSecurityGroup,
     database: database.instance,
     allowedCidrs: cidrs,
+    appVersion,
   });
-  return { app, network, database, application };
+  const github = new GithubStack(app, 'StatuspageGithub', { env, githubRepo: config.context.githubRepo });
+  return { app, network, database, application, github };
 }
 
 function singleResource(template: Template, type: string, properties: Record<string, unknown>) {
@@ -61,7 +65,7 @@ function userDataScript(userData: { 'Fn::Base64': string }): string {
   return userData['Fn::Base64'];
 }
 
-describe('Phase 5 のスタック', () => {
+describe('Phase 5・6 のスタック', () => {
   const stacks = createStacks(allowedCidrs);
   const assembly = stacks.app.synth();
   const network = Template.fromStack(stacks.network);
@@ -195,13 +199,19 @@ describe('Phase 5 のスタック', () => {
     expect(ingressRules(application).filter(rule => rule.FromPort === 5432)).toEqual(rules);
   });
 
-  test('依存関係は App → Database・Network、Database → Network のみ', () => {
+  test('依存関係は App → Database・Network、Database → Network のみで Github は独立する', () => {
     expect(stacks.network.dependencies).toEqual([]);
     expect(stacks.database.dependencies).toEqual([stacks.network]);
     expect(stacks.application.dependencies).toEqual(expect.arrayContaining([stacks.network, stacks.database]));
     expect(stacks.application.dependencies).toHaveLength(2);
+    expect(stacks.github.dependencies).toEqual([]);
+    const githubArtifact = assembly.getStackArtifact(stacks.github.artifactId);
+    expect(githubArtifact.dependencies.filter(dependency => dependency.manifest.type === 'aws:cloudformation:stack')).toEqual([]);
     for (const stack of assembly.stacks) {
       expect(stack.environment.region).toBe('ap-southeast-2');
+      if (stack.id !== stacks.github.artifactId) {
+        expect(stack.dependencies.map(dependency => dependency.id)).not.toContain(stacks.github.artifactId);
+      }
     }
   });
 
@@ -267,7 +277,7 @@ describe('Phase 5 のスタック', () => {
     });
   });
 
-  test('EC2 ロールは SSM と、既存のアプリ用シークレット・指定 DB への読み取りだけを持つ', () => {
+  test('EC2 ロールは SSM・アプリ用シークレット・指定 DB と自スタックへの起動通知だけを持つ', () => {
     application.resourceCountIs('AWS::IAM::Role', 1);
     application.hasResourceProperties('AWS::IAM::Role', {
       AssumeRolePolicyDocument: Match.objectLike({ Statement: [{
@@ -286,17 +296,46 @@ describe('Phase 5 のスタック', () => {
     const rds = statements.find(statement => [statement.Action].flat().includes('rds:DescribeDBInstances'));
     expect(rds).toBeDefined();
     expect(rds.Resource).toEqual(stacks.application.resolve(stacks.database.instance.instanceArn));
+    const signal = statements.find(statement => [statement.Action].flat().includes('cloudformation:SignalResource'));
+    expect(signal).toEqual({
+      Effect: 'Allow', Action: 'cloudformation:SignalResource',
+      // signals が自動追加する StackId も、自分のスタックだけを指すことを確認する。
+      Resource: [stacks.application.resolve(stacks.application.formatArn({
+        service: 'cloudformation', resource: 'stack', resourceName: 'StatuspageApp/*',
+      })), { Ref: 'AWS::StackId' }],
+    });
     for (const statement of statements) {
       expect([statement.Resource].flat()).not.toContain('*');
       expect([statement.Action].flat()).not.toContain('*');
       expect(statement.Effect).toBe('Allow');
     }
-    expect(statements).toHaveLength(2);
+    expect(statements).toHaveLength(3);
   });
 
-  test('起動テンプレートは Arm の t4g.micro と IMDSv2 を使い、ROLE だけが異なる', () => {
+  test.each([
+    ['2', 2, 2],
+    ['1', 0, 1],
+  ])('希望台数 %s の ASG は起動通知を10分待ち、1台ずつローリング更新する', (desired, minimum, count) => {
+    application.hasResource('AWS::AutoScaling::AutoScalingGroup', {
+      Properties: Match.objectLike({ DesiredCapacity: desired }),
+      CreationPolicy: {
+        ResourceSignal: { Count: count, Timeout: 'PT10M' },
+      },
+      UpdatePolicy: Match.objectLike({
+        AutoScalingRollingUpdate: Match.objectLike({
+          MaxBatchSize: 1,
+          MinInstancesInService: minimum,
+          WaitOnResourceSignals: true,
+          PauseTime: 'PT10M',
+        }),
+      }),
+    });
+  });
+
+  test('起動テンプレートは Arm・IMDSv2・指定 SHA を使い、ROLE と通知先 ASG だけが異なる', () => {
     application.resourceCountIs('AWS::EC2::LaunchTemplate', 2);
     const source = readFileSync(path.join(__dirname, '../../deploy/ec2/user-data.sh'), 'utf8');
+    const resourceIds: string[] = [];
     for (const [role, description] of [['api', 'statuspage web'], ['worker', 'statuspage worker']] as const) {
       const template = singleResource(application, 'AWS::EC2::LaunchTemplate', { LaunchTemplateData: Match.objectLike({
         SecurityGroupIds: [groupId(group(application, description).id)],
@@ -306,10 +345,23 @@ describe('Phase 5 のスタック', () => {
       });
       expect(template.properties.LaunchTemplateData.KeyName).toBeUndefined();
       const script = userDataScript(template.properties.LaunchTemplateData.UserData);
+      const asg = singleResource(application, 'AWS::AutoScaling::AutoScalingGroup', {
+        LaunchTemplate: Match.objectLike({ LaunchTemplateId: { Ref: template.id } }),
+      });
+      resourceIds.push(asg.id);
       expect(script).toContain(`ROLE="${role}"`);
       expect(script).not.toContain(`ROLE="${role === 'api' ? 'worker' : 'api'}"`);
-      expect(script).toBe(role === 'api' ? source : source.replace('ROLE="api"', 'ROLE="worker"'));
+      expect(script).toContain(`APP_VERSION="${appVersion}"`);
+      expect(script).not.toContain('APP_VERSION="main"');
+      expect(script).toContain('CFN_STACK="StatuspageApp"');
+      expect(script).toContain(`CFN_RESOURCE="${asg.id}"`);
+      expect(script).toBe(source
+        .replace('ROLE="api"', `ROLE="${role}"`)
+        .replace('APP_VERSION="main"', `APP_VERSION="${appVersion}"`)
+        .replace('CFN_STACK=""', 'CFN_STACK="StatuspageApp"')
+        .replace('CFN_RESOURCE=""', `CFN_RESOURCE="${asg.id}"`));
     }
+    expect(new Set(resourceIds).size).toBe(2);
     const parameters = Object.values(application.toJSON().Parameters) as { Type: string; Default?: string }[];
     expect(parameters).toEqual(expect.arrayContaining([expect.objectContaining({
       Type: 'AWS::SSM::Parameter::Value<AWS::EC2::Image::Id>',

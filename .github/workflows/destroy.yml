@@ -1,0 +1,42 @@
+name: Destroy app
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  destroy:
+    if: vars.DEPLOY_ENABLED == 'true'
+    runs-on: ubuntu-latest
+    environment: aws
+    permissions:
+      id-token: write
+      contents: read
+    # デプロイと同時に実行せず、進行中の操作を完了させる。
+    concurrency:
+      group: statuspage-aws
+      cancel-in-progress: false
+    defaults:
+      run:
+        working-directory: infra
+    steps:
+      # 削除対象はコードで定義した App スタックだけにする。
+      - uses: actions/checkout@v7.0.1
+      # デプロイ時と同じ CDK の実行環境を用意する。
+      - uses: actions/setup-node@v7.1.0
+        with:
+          node-version: '24'
+          cache: npm
+          cache-dependency-path: infra/package-lock.json
+      # ロックファイルどおりの依存で削除を実行する。
+      - run: npm ci
+      # 削除にも環境 aws の保護と OIDC を使い、アカウントIDをログに残さない。
+      - uses: aws-actions/configure-aws-credentials@v6.3.0
+        with:
+          role-to-assume: ${{ secrets.AWS_ROLE_ARN }}
+          aws-region: ap-southeast-2
+          mask-aws-account-id: true
+      # DB・ネットワーク・認証基盤は寿命が違うため、毎日の片付けでは App だけを消す。
+      - run: npx cdk destroy StatuspageApp --force

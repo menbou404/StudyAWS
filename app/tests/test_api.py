@@ -1,7 +1,27 @@
-def test_healthz(client):
+from fastapi.testclient import TestClient
+from pytest import MonkeyPatch
+
+from statuspage import config
+
+
+def test_healthz(client: TestClient) -> None:
     response = client.get("/healthz")
     assert response.status_code == 200
-    assert response.json() == {"status": "ok"}
+    assert response.json() == {"status": "ok", "version": config.APP_VERSION}
+
+
+def test_healthz_returns_app_version_without_db(client: TestClient, monkeypatch: MonkeyPatch) -> None:
+    def unexpected_session() -> None:
+        raise AssertionError("浅いヘルスチェックでは DB に接続しない")
+
+    monkeypatch.setattr(config, "APP_VERSION", "0123456789abcdef0123456789abcdef01234567")
+    monkeypatch.setattr("statuspage.api.SessionLocal", unexpected_session)
+    response = client.get("/healthz")
+    assert response.status_code == 200
+    assert response.json() == {
+        "status": "ok",
+        "version": "0123456789abcdef0123456789abcdef01234567",
+    }
 
 
 def test_create_and_list_targets(client):

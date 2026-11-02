@@ -4,7 +4,7 @@ set -euo pipefail
 # ユーザーデータは、EC2 の起動時に環境を自動構築するためのスクリプト。
 # cloud-init により初回起動時に一度だけ root として実行される。
 # 実行ログは /var/log/cloud-init-output.log で確認できる。
-# api と worker の起動テンプレートで共用し、ROLE だけを変更する。
+# api と worker の起動テンプレートで共用し、役割と CloudFormation の知らせ先を変更する。
 # IMDS 経由でインスタンス内から読めるため秘密は書かず、起動時に取得する。
 set -x
 
@@ -18,10 +18,20 @@ DB_INSTANCE_ID="statuspage-db"
 SECRET_ID="statuspage/db-app"
 # 自動起動したインスタンスにも同じリポジトリを配置する。
 REPO_URL="https://github.com/menbou404/StudyAWS.git"
-# 配置するコードの取得元をそろえる。
-REPO_BRANCH="main"
+# 取ってくるコードのバージョン。ブランチ名か40文字のコミット SHA。CDK はデプロイのたびに SHA に置き換える。
+APP_VERSION="main"
 # app/Dockerfile と同じバージョンに固定してインストール結果をそろえる。更新するときは Dockerfile・手順書と一緒に変える。
 UV_VERSION="0.13.5"
+
+# Phase 6：CDK が知らせ先を埋める。Phase 4 の手貼りでは空のまま使えるようにする。
+CFN_STACK=""
+CFN_RESOURCE=""
+if [[ -n "$CFN_STACK" && -n "$CFN_RESOURCE" ]]; then
+    # set -e による途中終了も拾うため、パッケージ導入より先に EXIT を登録する。
+    # 導入自体に失敗して送信できない場合も、CloudFormation の10分の待機で失敗になる。
+    trap 'exit_code=$?; /opt/aws/bin/cfn-signal -e "$exit_code" --stack "$CFN_STACK" --resource "$CFN_RESOURCE" --region "$REGION"; exit "$exit_code"' EXIT
+    dnf install -y aws-cfn-bootstrap
+fi
 
 case "$ROLE" in
     api|worker) ;;
@@ -45,8 +55,13 @@ fi
 curl -LsSf "https://astral.sh/uv/${UV_VERSION}/install.sh" | env UV_INSTALL_DIR=/usr/local/bin UV_NO_MODIFY_PATH=1 sh
 
 # Phase 2 手順8-1を置き換え、アプリの実行ユーザーが依存関係を配置できるようにする。
-git clone --branch "$REPO_BRANCH" --depth 1 "$REPO_URL" /opt/statuspage
-chown -R statuspage:statuspage /opt/statuspage
+install -d -o statuspage -g statuspage /opt/statuspage
+# Phase 6：SHA とブランチを同じ手順で取得し、所有者として git を動かして safe.directory の例外を避ける。
+sudo -u statuspage -H git -C /opt/statuspage init
+sudo -u statuspage -H git -C /opt/statuspage remote add origin "$REPO_URL"
+sudo -u statuspage -H git -C /opt/statuspage fetch --depth 1 origin "$APP_VERSION"
+sudo -u statuspage -H git -C /opt/statuspage checkout --detach FETCH_HEAD
+RESOLVED_APP_VERSION=$(sudo -u statuspage -H git -C /opt/statuspage rev-parse HEAD)
 
 # Phase 2 手順8-2を置き換え、ロック済みの実行用依存関係だけを入れる。
 cd /opt/statuspage/app
@@ -68,6 +83,7 @@ if [[ ! "$DB_PASSWORD" =~ ^[a-zA-Z0-9]+$ ]]; then
 fi
 install -m 600 -o root -g root /opt/statuspage/deploy/ec2/statuspage.env.example /etc/statuspage.env
 sed -i "s#^DATABASE_URL=.*#DATABASE_URL=postgresql+psycopg://statuspage:${DB_PASSWORD}@${DB_HOST}:5432/statuspage?sslmode=require#" /etc/statuspage.env
+sed -i "s#^APP_VERSION=.*#APP_VERSION=${RESOLVED_APP_VERSION}#" /etc/statuspage.env
 unset DB_PASSWORD
 set -x
 

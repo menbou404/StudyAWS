@@ -16,6 +16,7 @@ from pydantic import BaseModel, ConfigDict, Field, HttpUrl
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
+from statuspage import config
 from statuspage.db import Check, SessionLocal, Target, init_db
 
 
@@ -89,7 +90,7 @@ def to_out(session: Session, target: Target) -> TargetOut:
 @app.get("/healthz")
 def healthz() -> dict[str, str]:
     """アプリが生きているかだけを返す（Phase 4 で ALB のヘルスチェックに使う）。"""
-    return {"status": "ok"}
+    return {"status": "ok", "version": config.APP_VERSION}
 
 
 @app.get("/api/targets")
