@@ -18,6 +18,9 @@
 | `app/tests/` | pytest のテスト。`conftest.py` がテストごとに SQLite を作り直す |
 | `app/Dockerfile` | api と worker が共有するイメージ |
 | `compose.yaml` | db（PostgreSQL）/ api / worker |
+| `deploy/ec2/` | EC2 用のユーザーデータ、systemd のユニット、nginx の設定 |
+| `infra/` | AWS CDK（TypeScript）のコード（Phase 5 以降） |
+| `.github/workflows/` | GitHub Actions のワークフロー（Phase 6 以降） |
 
 ## コマンド
 
@@ -62,6 +65,19 @@ docker compose up --build   # リポジトリ直下で、3つのコンテナを�
 - `infra/test/` に `aws-cdk-lib/assertions` のテストを書き、`npm test` で通ることを確認する（DB に受信できるのは web と worker の SG だけ、など守りたいルールを確かめる）
 - `infra/tsconfig.json` は `noEmit`。`tsc` に `.js` を出力させない（`bin/`・`lib/`・`test/` に古い `.js` が残ると、jest は `.ts` より `.js` を優先して読み、直したはずのコードがテストされない）。依存は `infra/package.json` で exact 固定、テストは公式雛形どおり `@swc/jest`、実行は `tsx`
 - CDK の L2 の既定値や挙動はドキュメントと違うことがある（例：`DatabaseInstanceFromSnapshot` の容量の既定は 100GiB、`MachineImage.latestAmazonLinux2023` は `kernel` を上書きする）。守りたい値はテストで確かめる
+
+## CI/CD（Phase 6 以降）
+
+- GitHub Actions のワークフローは `.github/workflows/` に置く。`ci-cd.yml`（テストとデプロイ）、`destroy.yml`（アプリのスタックを消す。手で実行）
+- テストのジョブは AWS に触らない（認証情報なしで `uv run pytest`、`npm test`、`cdk synth` が通るようにする）。依存はロックファイルどおりに入れる（`uv sync --locked`、`npm ci`）。uv のバージョンは `app/Dockerfile` とそろえる
+- AWS には OIDC で入る（`aws-actions/configure-aws-credentials` の `role-to-assume`）。アクセスキーを使わない。デプロイのジョブは環境 `aws` を使い、`permissions` は `id-token: write` と `contents: read` だけ。ワークフロー全体の既定は `contents: read`
+- GitHub Actions 用のロールの権限は、CDK のブートストラップのロール（`cdk-hnb659fds-*`）を引き受けることと、`StatuspageApp` の `cloudformation:DescribeStacks` だけ。リソースを作る権限を直接付けない
+- 公開リポジトリなのでログは公開される。ロールの ARN と IP アドレスは環境のシークレット（`AWS_ROLE_ARN`、`ALLOWED_CIDRS`）から読み、アカウントID はマスクする（`mask-aws-account-id: true`）。CIDR は1つずつ `::add-mask::` する。ALB の DNS 名は出力を `sed` で伏せ字にする。シークレットを `echo` しない
+- デプロイは `vars.DEPLOY_ENABLED == 'true'` のときだけ。push で動いたときは、`StatuspageApp` がなければデプロイせずに終える（課金されるものを勝手に作らない）。`workflow_dispatch` のときは作る
+- `pull_request_target` を使わない。アクションは公式（`actions/`、`aws-actions/`、`astral-sh/`）のものを、バージョンを固定して使う
+- アプリのバージョンはコミット SHA で固定する。CDK は `-c appVersion=<40文字の16進数 または main>` を受け取り、それ以外は拒否する（ユーザーデータに埋め込むため）。未指定は `main`
+- ユーザーデータは起動の成功・失敗を cfn-signal で CloudFormation に知らせ、Auto Scaling グループはローリング更新（失敗したらロールバック）にする。手で起動テンプレートに貼ったとき（Phase 4 の手順）も動くよう、知らせ先が空なら知らせない
+- OIDC の ID プロバイダーと GitHub Actions 用のロールは、スタック `StatuspageGithub` に置く（ほかのスタックと参照しない。手元からだけデプロイする）。ロール名は `statuspage-github-deploy` に固定する（GitHub のシークレットが ARN で探すため）
 
 ## 禁止事項
 
