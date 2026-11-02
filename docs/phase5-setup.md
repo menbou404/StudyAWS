@@ -322,7 +322,7 @@ npx cdk deploy StatuspageApp --profile study -c allowedCidrs=...
 - 監視の記録は残っていたか。それはなぜか
 - `StatuspageDatabase` を `cdk destroy` したら、何が起きるか（実行はしない）
 
-- [ ] 完了
+- [x] 完了
 
 ## 12. 手で作った残りを消す
 
@@ -341,7 +341,7 @@ CDK の構成で、手順8が確かめられてから消す。
 - **`10.1.0.0/16`（CDK の VPC）を消さないように**、CIDR を必ず確認する
 - 消せないときは、エラーに出てくるリソース（ネットワークインターフェースなど）がまだ使われていないか確認する
 
-- [ ] 完了
+- [x] 完了
 
 ## 13. 毎回の終わりに
 
@@ -366,7 +366,7 @@ RDS：コンソールで `statuspage-db` を「アクション」→「一時的
 - `StatuspageNetwork` と `StatuspageDatabase` は残しておく（ネットワークは無料、DB は停止できる）
 - 1週間以上空けるときは、[phase3-setup.md](phase3-setup.md) の手順15と同じ考え方で、RDS を停止したままにしない（7日で自動で起動する）
 
-- [ ] 理解した
+- [x] 理解した
 
 ## 14. Phase 5 の片付け
 
@@ -382,5 +382,5 @@ Phase 6 でも、この3つのスタックを使う。手順13の「学習を終
 
 - スナップショット `statuspage-db-phase4-final` は **消さない**。`StatuspageDatabase` のテンプレートがこの名前を参照し続けるので、消すと、DB の置き換えが必要な変更のときにデプロイが失敗する。料金は、中のデータの量の分だけ（ごくわずか）
 
-- [ ] `StatuspageApp` を削除
-- [ ] RDS を停止
+- [x] `StatuspageApp` を削除
+- [x] RDS を停止
