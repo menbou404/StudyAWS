@@ -1,57 +1,61 @@
-# Phase 6 手順書: GitHub Actions でテストと自動デプロイ（CI/CD）
+# Phase 6 手順書: GitHub Actions でテスト、CodePipeline で自動デプロイ（CI/CD）
 
-> main ブランチにアプリの変更が入ったら、GitHub Actions がテストを動かし、通ったら AWS にデプロイする仕組みを作る。AWS には、アクセスキーではなく OIDC で入る。
+> プルリクエストや main への push のたびに、GitHub Actions がテストを動かす（CI）。main に変更が入ったら、AWS の CodePipeline と CodeBuild がテストとデプロイを行う（CD）。
 > 動いているインスタンスは、新しいバージョンのインスタンスに1台ずつ入れ替える（ローリング更新）。失敗したら元に戻る（ロールバック）。
-> 仕組みの解説は [phase6-study.md](phase6-study.md)、ブランチ保護や別のデプロイ方式などは [phase6-appendix.md](phase6-appendix.md)。
+> 仕組みの解説は [phase6-study.md](phase6-study.md)、GitHub Actions から OIDC でデプロイする方法などは [phase6-appendix.md](phase6-appendix.md)。
 
 ## ゴール
 
 - GitHub Actions のワークフローを読んで、いつ・何が・どの順番で動くかを説明できる
-- アクセスキーを作らずに、OIDC で GitHub Actions から AWS に入れる
-- GitHub Actions 用の IAM ロールの「誰が引き受けられるか」と「何ができるか」を、最小限に絞れる
-- アプリを変えて main に入れると、テスト → デプロイ → インスタンスの入れ替えが自動で進むことを確かめる
+- CodePipeline のパイプラインと CodeBuild のプロジェクトを作り、main への push でデプロイが進むことを確かめる
+- デプロイを動かすロールの権限を、最小限に絞れる
 - テストが落ちたとき、起動に失敗したときに、何が止まり、何が残るかを説明できる
+- 手で作ったパイプラインを CDK でコード化できる
 
 ## 環境
 
 | 項目 | 値 |
 |---|---|
 | リージョン | `ap-southeast-2`（シドニー） |
-| CI/CD | GitHub Actions（GitHub が用意する Linux のマシンで動く） |
-| ワークフロー | `.github/workflows/ci-cd.yml`（テストとデプロイ）、`.github/workflows/destroy.yml`（アプリのスタックを消す） |
-| AWS への入り方 | OIDC（IAM の ID プロバイダー + GitHub Actions 用の IAM ロール） |
-| IaC | Phase 5 の CDK（`infra/`）。GitHub Actions も同じ `cdk deploy` を実行する |
+| CI | GitHub Actions（`.github/workflows/ci.yml`）。GitHub が用意する Linux のマシンで動く |
+| CD | CodePipeline（V2）+ CodeBuild。GitHub とは「接続」（CodeConnections）でつなぐ |
+| CodeBuild のマシン | Amazon Linux 2023 の ARM（`aws/codebuild/amazonlinux-aarch64-standard:4.0`）、小さいサイズ |
+| CodeBuild の手順 | `deploy/codebuild/test.yml`・`deploy.yml`・`destroy.yml`（buildspec） |
+| IaC | Phase 5 の CDK（`infra/`）。パイプラインもスタック `StatuspagePipeline` にする |
 | 手元からの認証 | `aws login --profile study`（Phase 0） |
 
 ### 作るもの
 
 | 場所 | もの | 作り方 |
 |---|---|---|
-| AWS | IAM の ID プロバイダー（`token.actions.githubusercontent.com`） | 手順3で手作業 → 手順11で CDK（`StatuspageGithub`） |
-| AWS | IAM ロール `statuspage-github-deploy`（GitHub Actions が引き受ける） | 手順4で手作業 → 手順11で CDK（`StatuspageGithub`） |
-| GitHub | 環境 `aws`（main ブランチだけがデプロイできる） | 手順5 |
-| GitHub | 環境のシークレット `AWS_ROLE_ARN`・`ALLOWED_CIDRS`、リポジトリの変数 `DEPLOY_ENABLED` | 手順5 |
+| AWS | 接続 `statuspage-github`（GitHub のリポジトリを読む） | 手順3で手作業（コード化しない） |
+| AWS | パラメータストアの値 `/statuspage/allowed-cidrs`・`/statuspage/github-connection-arn` | 手順4で手作業（コード化しない） |
+| AWS | パイプライン `statuspage-manual` と CodeBuild のプロジェクト `statuspage-deploy-manual` | 手順5で手作業 → 手順7で消す |
+| AWS | パイプライン `statuspage`（ソース → テスト → デプロイ）と `statuspage-destroy`（変数 `CONFIRM_DESTROY` が `true` のときだけ、アプリのスタックを消す） | 手順7で CDK（`StatuspagePipeline`） |
 
 ### Phase 5 から変わるコード
 
 | ファイル | 変わること |
 |---|---|
-| `.github/workflows/ci-cd.yml` | 新規。app と infra のテスト、通ったら main だけデプロイ |
-| `.github/workflows/destroy.yml` | 新規。アプリのスタックを消す（手で実行する） |
+| `.github/workflows/ci.yml` | 新規。app と infra のテスト |
+| `deploy/codebuild/*.yml` | 新規。CodeBuild で動かす手順（テスト・デプロイ・削除） |
 | `deploy/ec2/user-data.sh` | 取ってくるコードを `APP_VERSION`（コミット SHA）で固定する。最後に、起動の成功・失敗を CloudFormation に知らせる（cfn-signal） |
 | `app/statuspage/api.py` ほか | `/healthz` が、動いているバージョンも返す |
 | `infra/lib/app-stack.ts` | `-c appVersion=...` を受け取る。Auto Scaling グループをローリング更新にする |
-| `infra/lib/github-stack.ts` | 新規。ID プロバイダーと GitHub Actions 用のロール（手順11で使う） |
+| `infra/lib/pipeline-stack.ts` | 新規。パイプライン2つと CodeBuild のプロジェクト（手順7で使う） |
 
-- GitHub Actions は、デプロイするとき `-c appVersion=<そのコミットの SHA>` を渡す。起動テンプレートのユーザーデータが変わるので、Auto Scaling グループのインスタンスが新しいものに入れ替わる
-- アプリのスタックがないとき（学習していないとき）に main へ push しても、デプロイはしない（課金されるものを勝手に作らない）。作るのは、手で「Run workflow」を押したときだけ
+- パイプラインは、デプロイするとき `-c appVersion=<そのコミットの SHA>` を渡す。起動テンプレートのユーザーデータが変わるので、Auto Scaling グループのインスタンスが新しいものに入れ替わる
+- アプリのスタックがないとき（学習していないとき）に main へ push しても、デプロイはしない（課金されるものを勝手に作らない）。作るのは、手で「変更をリリース」を押し、変数 `CREATE_APP` を `true` にしたときだけ
 
 ### 費用（目安）
 
 | もの | 料金 |
 |---|---|
 | GitHub Actions | 公開リポジトリで GitHub のマシンを使う分は無料 |
-| IAM（ID プロバイダー・ロール） | 無料 |
+| 接続、パラメータストア（標準）、IAM | 無料 |
+| CodePipeline（V2） | 動いたアクションの時間（分）だけ。止まっている間は0 |
+| CodeBuild | ビルドの時間（分）だけ。デプロイ1回で十数分、数円〜十数円ほど |
+| S3（パイプラインの受け渡し用）、CloudWatch Logs（ビルドのログ） | 置いた量の分だけ。ほぼ0 |
 | AWS のリソース | Phase 5 と同じ（全部動かすと 約 $0.12 / 時間）。入れ替えの間だけ api が1台増える |
 
 ---
@@ -63,31 +67,28 @@
 >
 > 読んだら考える：Phase 5 で、アプリのコードを変えて AWS に反映するには、何をすればよかったか。どこで間違えそうか
 
-1. `git pull` して、`.github/workflows/` に `ci-cd.yml` と `destroy.yml` があることを確認する
+1. `git pull` して、`.github/workflows/ci.yml` と `deploy/codebuild/` があることを確認する
 2. Budgets の月次コスト予算と、クレジットの残高を確認する
 3. Phase 5 の手順14の状態か確認する（`StatuspageApp` がない、RDS が停止）
 
-- [ ] 完了
+- [x] 完了
 
 ## 1. ワークフローを読む
 
 > 📖 **先に読む**
 > - [study §2 GitHub Actions の基本](phase6-study.md#2-github-actions-の基本)：全体
 >
-> 読んだら考える：`ci-cd.yml` の3つのジョブは、どの順番で動くか。プルリクエストのときと、main への push のときで、何が違うか
+> 読んだら考える：`ci.yml` の2つのジョブは、どの順番で動くか。プルリクエストのときと、main への push のときで、何が違うか
 
-`.github/workflows/ci-cd.yml` と `destroy.yml` を読み、次の表を自分で埋める（`docs/log/phase6-result.md` に書く）。
+`.github/workflows/ci.yml` を読み、次の表を自分で埋める（`docs/log/phase6-result.md` に書く）。
 
 | 読むところ | 調べること |
 |---|---|
 | `on:` | どんなとき動くか。`paths:` に入っていないファイル（`docs/` など）だけを変えたときはどうなるか |
 | `jobs:` の `test-app`・`test-infra` | それぞれ、どのフォルダで何のコマンドを実行するか |
-| `deploy` の `needs:`・`if:` | 何が終わったら、どんな条件のときに動くか |
-| `deploy` の `environment:`・`permissions:` | どの環境を使い、どんな権限をもらうか |
-| `deploy` の手順 | アプリのスタックがないときに、どこで止まるか |
-| `concurrency:` | デプロイが2つ同時に始まりそうなとき、どうなるか |
+| `permissions:` | どんな権限をもらうか |
 
-- [ ] 完了
+- [x] 完了
 
 ## 2. CI の結果を見る
 
@@ -97,85 +98,103 @@
 > 読んだら考える：CI で `uv sync --locked` や `npm ci` を使うのはなぜか
 
 1. GitHub のリポジトリの「Actions」タブを開く
-2. 左の一覧から「CI/CD」を選び、一番新しい実行（ワークフローを追加したときの push で動いたもの）を開く
+2. 左の一覧からワークフローを選び、一番新しい実行を開く
 3. `test-app`・`test-infra` のログを開き、テストの件数と結果、かかった時間を見る
-4. `deploy` が「skipped」になっていることを確認する
 
 考えること：
 
-- `deploy` が動かなかったのは、`if:` のどの条件のためか
 - 手元で `uv run pytest` を実行するのと比べて、何がうれしいか
 
-- [ ] 完了
+- [x] 完了
 
-## 3. GitHub を ID プロバイダーとして登録する
+## 3. GitHub と AWS をつなぐ（接続）
 
 > 📖 **先に読む**
-> - [study §4 OIDC で AWS に入る](phase6-study.md#4-oidc-で-aws-に入る)：全体
+> - [study §4 AWS の CI/CD サービス](phase6-study.md#4-aws-の-cicd-サービス)：全体
 >
-> 読んだら考える：GitHub Actions にアクセスキーを渡す方法と比べて、OIDC では何が漏れにくくなるか
+> 読んだら考える：接続を作るとき、GitHub 側にどんな許可を与えるか。すべてのリポジトリを許可しないのはなぜか
 
-1. コンソールで「IAM」→ 左メニュー「ID プロバイダ」→「プロバイダを追加」
-2. 次のように入力して追加する
+1. コンソールで「CodePipeline」→ 左メニュー「設定」→「接続」→「接続を作成」
+2. プロバイダー「GitHub」、接続名 `statuspage-github` →「GitHub に接続する」
+3. 「新しいアプリをインストールする」を押す。GitHub の画面で、**「Only select repositories」で `StudyAWS` だけ**を選び、「Install」
+4. AWS の画面に戻り、「接続」を押す。状態が「利用可能」になることを確認する
+5. 接続の ARN をコピーしておく（次の手順で使う。チャットやリポジトリには貼らない）
 
-| 項目 | 値 |
-|---|---|
-| プロバイダのタイプ | OpenID Connect |
-| プロバイダの URL | `https://token.actions.githubusercontent.com` |
-| 対象者 | `sts.amazonaws.com` |
-
-- これは「GitHub が発行するトークンを信用する」という登録。まだ誰も AWS に入れない（入れる条件は、次の手順のロールで決める）
-- 同じ URL のプロバイダは、1つのアカウントに1つしか作れない
+- GitHub 側には「AWS Connector for GitHub」というアプリが入る。GitHub の「Settings」→「Applications」で、許可したリポジトリを後から確認・変更できる
+- 接続は、CloudFormation で作っても「GitHub での許可」だけは画面で行う必要がある。だから、コード化せずに手で作ったものを使い続ける
 
 - [ ] 完了
 
-## 4. GitHub Actions 用の IAM ロールを作る
+## 4. パラメータストアに値を置く
 
 > 📖 **先に読む**
-> - [study §5 GitHub Actions 用の IAM ロール](phase6-study.md#5-github-actions-用の-iam-ロール)：全体
+> - [study §6 CodeBuild とデプロイの権限](phase6-study.md#6-codebuild-とデプロイの権限)：「パラメータストア」
+>
+> 読んだら考える：自分の IP アドレスや接続の ARN を、リポジトリのファイルに書かずにパラメータストアに置くのはなぜか
+
+コンソールで「Systems Manager」→ 左メニュー「パラメータストア」→「パラメータの作成」で、2つ作る。どちらも「標準」、タイプ「文字列」。
+
+| 名前 | 値 |
+|---|---|
+| `/statuspage/allowed-cidrs` | ALB に入れる IP アドレス。`a.a.a.a/32`、複数なら `a.a.a.a/32,b.b.b.b/32`（Phase 5 の `-c allowedCidrs` と同じ形） |
+| `/statuspage/github-connection-arn` | 手順3の接続の ARN |
+
+自分の IP アドレスは、macOS なら `curl -s https://checkip.amazonaws.com`、Windows（PowerShell）なら `(Invoke-RestMethod https://checkip.amazonaws.com).Trim()` で調べる。
+
+- IP アドレスは、場所（家・大学）や PC によって変わる。変わったら `/statuspage/allowed-cidrs` を更新する
+
+- [ ] 完了
+
+## 5. パイプラインを手で作る
+
+> 📖 **先に読む**
+> - [study §5 CodePipeline の仕組み](phase6-study.md#5-codepipeline-の仕組み)：全体
+> - [study §6 CodeBuild とデプロイの権限](phase6-study.md#6-codebuild-とデプロイの権限)：「buildspec」「ビルドのロール」
 > - [phase2-study §6 IAM ロールと EC2](phase2-study.md#6-iam-ロールと-ec2)：「仕組み」（復習）
 >
-> 読んだら考える：このロールに、EC2 や ALB を作る権限を直接付けないのはなぜか。それでも `cdk deploy` ができるのはなぜか
+> 読んだら考える：デプロイのプロジェクトのロールに、EC2 や ALB を作る権限を直接付けないのはなぜか。それでも `cdk deploy` ができるのはなぜか
 
-### 4-1. ロールを作る
+まずは「ソース → デプロイ」の2段だけのパイプラインを手で作る（テストの段は、手順7で CDK にしたときに足す）。
 
-1. 「IAM」→「ロール」→「ロールを作成」
-2. 信頼されたエンティティタイプ：「ウェブアイデンティティ」
-3. アイデンティティプロバイダー：`token.actions.githubusercontent.com`、Audience：`sts.amazonaws.com`
-4. GitHub organization：自分の GitHub のユーザー名、GitHub repository：`StudyAWS`、GitHub branch：空欄 →「次へ」
-5. 許可ポリシーは何も選ばずに「次へ」
-6. ロール名 `statuspage-github-deploy` →「ロールを作成」
+### 5-1. パイプラインを作る
 
-### 4-2. 信頼ポリシーを「環境 aws」に絞る
+「CodePipeline」→「パイプラインを作成する」で、次のように進める。
 
-作ったロールの「信頼関係」タブ →「信頼ポリシーを編集」で、次の形にする。`<アカウントID>` はコンソール右上からコピーする（Phase 3 で、手で打って1文字間違えると AccessDenied になった）。
+| 画面 | 設定 |
+|---|---|
+| 作成オプション | カスタムパイプラインを構築する |
+| パイプラインの設定 | 名前 `statuspage-manual`、実行モード「キュー」（QUEUED）、サービスロール「新しいサービスロール」 |
+| 変数（パイプラインの設定の中） | 名前 `CREATE_APP`、デフォルト値 `false` |
+| ソース | プロバイダー「GitHub（GitHub アプリ経由）」、接続 `statuspage-github`、リポジトリ `StudyAWS`、デフォルトブランチ `main` |
+| トリガー | 「フィルターを指定」、イベント「プッシュ」、ブランチ `main`、ファイルパスに `app/**`・`infra/**`・`deploy/**` |
+| ビルド | プロバイダー「AWS CodeBuild」→「プロジェクトを作成する」（下の 5-2）。作ったら、このステージは「スキップ」せずにそのまま次へ |
+| テスト・デプロイ | スキップ |
 
-```json
-{
-  "Version": "2012-10-17",
-  "Statement": [
-    {
-      "Effect": "Allow",
-      "Principal": {
-        "Federated": "arn:aws:iam::<アカウントID>:oidc-provider/token.actions.githubusercontent.com"
-      },
-      "Action": "sts:AssumeRoleWithWebIdentity",
-      "Condition": {
-        "StringEquals": {
-          "token.actions.githubusercontent.com:aud": "sts.amazonaws.com",
-          "token.actions.githubusercontent.com:sub": "repo:<GitHubのユーザー名>/StudyAWS:environment:aws"
-        }
-      }
-    }
-  ]
-}
-```
+- ステージの名前は「Build」のままだが、中身は `cdk deploy`（手で作るパイプラインでは、ビルドの段でデプロイする）
+- 画面の表記や項目の場所が違うときは、近いものを選び、どこが違ったかを記録しておく
 
-- `sub` が「どのリポジトリの、どの環境のジョブか」を表す。`StringLike` と `*` は使わない（ほかのリポジトリやブランチからも入れてしまう）
+### 5-2. CodeBuild のプロジェクトを作る（5-1 のビルドの画面から開く）
 
-### 4-3. 許可ポリシーを付ける
+| 項目 | 設定 |
+|---|---|
+| プロジェクト名 | `statuspage-deploy-manual` |
+| 環境 | マネージドイメージ、コンピューティング「EC2」、OS「Amazon Linux」、ランタイム「Standard」、イメージ `aws/codebuild/amazonlinux-aarch64-standard:4.0` |
+| サービスロール | 新しいサービスロール（名前を控えておく） |
+| Buildspec | 「buildspec ファイルを使用する」、名前 `deploy/codebuild/deploy.yml` |
 
-「許可」タブ →「許可を追加」→「インラインポリシーを作成」→ JSON で次を貼り、名前 `statuspage-github-deploy-policy` で作る。
+プロジェクトを作ったら、5-1 の画面に戻り、**環境変数** を2つ足す。
+
+| 名前 | 値 | タイプ |
+|---|---|---|
+| `APP_VERSION` | `#{SourceVariables.CommitId}` | プレーンテキスト |
+| `CREATE_APP` | `#{variables.CREATE_APP}` | プレーンテキスト |
+
+- `#{...}` は、パイプラインが実行のたびに値を入れてくれる変数。`SourceVariables.CommitId` は、ソースで取ってきたコミットの SHA
+- パイプラインを作ると、すぐに1回実行される。ロールの権限がまだないので、デプロイの段は失敗してよい（次の 5-3 のあとで、もう一度動かす）
+
+### 5-3. ビルドのロールに権限を足す
+
+「IAM」→「ロール」→ 5-2 で作られたロール →「許可を追加」→「インラインポリシーを作成」→ JSON で次を貼り、名前 `statuspage-deploy-policy` で作る。`<アカウントID>` はコンソール右上からコピーする（Phase 3 で、手で打って1文字間違えると AccessDenied になった）。
 
 ```json
 {
@@ -192,6 +211,12 @@
       "Effect": "Allow",
       "Action": "cloudformation:DescribeStacks",
       "Resource": "arn:aws:cloudformation:ap-southeast-2:<アカウントID>:stack/StatuspageApp/*"
+    },
+    {
+      "Sid": "ReadAllowedCidrs",
+      "Effect": "Allow",
+      "Action": "ssm:GetParameters",
+      "Resource": "arn:aws:ssm:ap-southeast-2:<アカウントID>:parameter/statuspage/allowed-cidrs"
     }
   ]
 }
@@ -199,46 +224,21 @@
 
 - 1つ目：Phase 5 のブートストラップで作った CDK 用のロール（デプロイ用・ファイル置き場用・調べもの用）を引き受ける権限だけ
 - 2つ目：アプリのスタックがあるか（学習中か）を調べる権限だけ
-- ロールの ARN（「概要」にある）を、次の手順で使う。チャットやリポジトリには貼らない
-
-- [ ] 完了
-
-## 5. GitHub の環境とシークレットを設定する
-
-> 📖 **先に読む**
-> - [study §6 環境とシークレット](phase6-study.md#6-環境とシークレット)：全体
-> - [study §10 公開リポジトリで CI/CD を扱う](phase6-study.md#10-公開リポジトリで-cicd-を扱う)：全体
->
-> 読んだら考える：ロールの ARN と自分の IP アドレスを、ワークフローのファイルに直接書かないのはなぜか。シークレットに入れれば、ログに出ても大丈夫か
-
-GitHub のリポジトリの「Settings」で設定する。
-
-1. 「Environments」→「New environment」→ 名前 `aws` →「Configure environment」
-2. 「Deployment branches and tags」で「Selected branches and tags」を選び、「Add deployment branch or tag rule」で `main` を追加する
-3. 同じ画面の「Environment secrets」→「Add environment secret」で2つ追加する
-
-| 名前 | 値 |
-|---|---|
-| `AWS_ROLE_ARN` | 手順4のロールの ARN |
-| `ALLOWED_CIDRS` | ALB に入れる IP アドレス。`a.a.a.a/32`、複数なら `a.a.a.a/32,b.b.b.b/32`（Phase 5 の `-c allowedCidrs` と同じ形） |
-
-4. 「Secrets and variables」→「Actions」→「Variables」タブ →「New repository variable」で、`DEPLOY_ENABLED` = `true` を追加する
-
-- `DEPLOY_ENABLED` は、デプロイのジョブを動かすかどうかのスイッチ。フォークした人のリポジトリでは設定されていないので、デプロイが失敗せずに飛ばされる
-- 自分の IP アドレスは、場所（家・大学）や PC によって変わる。変わったら `ALLOWED_CIDRS` を更新する
+- 3つ目：ALB に入れる IP アドレスを読む権限だけ
+- ログの書き込みや、パイプラインとのファイルの受け渡しの権限は、ロールを作ったときに CodeBuild が付けてくれている
 
 - [ ] 完了
 
 ## 6. 初めてのデプロイ
 
 > 📖 **先に読む**
-> - [study §7 デプロイの流れ](phase6-study.md#7-デプロイの流れ)：全体
+> - [study §8 デプロイの流れ](phase6-study.md#8-デプロイの流れ)：全体
 >
-> 読んだら考える：GitHub Actions は、取ってくるコードを `main` ではなくコミットの SHA で指定する。それはなぜか
+> 読んだら考える：インスタンスが取ってくるコードを、`main` ではなくコミットの SHA で指定するのはなぜか
 
 1. RDS：`statuspage-db` を「開始」し、「利用可能」になるまで待つ
-2. GitHub の「Actions」→「CI/CD」→「Run workflow」→ Branch `main` →「Run workflow」
-3. 実行を開き、`deploy` のログを見る（アカウントID は `***` に、ALB の DNS 名は伏せ字になっている）
+2. 「CodePipeline」→ `statuspage-manual` →「変更をリリース」。変数 `CREATE_APP` を `true` にして実行する
+3. デプロイの段の「詳細」から CodeBuild のログを開き、`cdk deploy` の進み方を見る
 4. 終わったら、手元で ALB の DNS 名を調べて、動いているバージョンを確かめる
 
 macOS：
@@ -259,16 +259,45 @@ git rev-parse HEAD
 
 5. ブラウザで `http://<ALB の DNS 名>/` を開き、Phase 5 までの監視対象と記録が表示されることを確認する
 
-- `/healthz` の `version` と、`git rev-parse HEAD` が同じことを確かめる
+- `/healthz` の `version` と、`git rev-parse HEAD` が同じことを確かめる（違うときは、手元が最新か `git pull` で確かめる）
 - `X-Served-By` に、どのインスタンスが答えたかが出る（Phase 4 と同じ）
-- GitHub Actions のマシンからは、ALB に入れない（セキュリティグループが自分の IP だけを許可している）。だから、動作の確認はインスタンスの起動スクリプトの中（cfn-signal）と、手元からの `curl` で行う
+- CodeBuild のマシンからは、ALB に入れない（セキュリティグループが自分の IP だけを許可している）。だから、動作の確認はインスタンスの起動スクリプトの中（cfn-signal）と、手元からの `curl` で行う
 
 - [ ] 完了
 
-## 7. 実験A：アプリを変えて、自動でデプロイする
+## 7. パイプラインを CDK でコード化する
+
+> 📖 **先に読む**
+> - [study §10 パイプラインをコード化する](phase6-study.md#10-パイプラインをコード化する)：全体
+>
+> 読んだら考える：`StatuspagePipeline` スタックを、パイプライン自身からではなく手元からデプロイするのはなぜか
+
+1. `infra/lib/pipeline-stack.ts` と `deploy/codebuild/*.yml` を読み、手順5で手作業でしたことのどれに当たるかを対応させる。手作業になかったもの（テストの段、`statuspage-destroy`）も確かめる
+2. `infra/` の中でデプロイする
+
+```bash
+npx cdk diff StatuspagePipeline --profile study
+npx cdk deploy StatuspagePipeline --profile study
+```
+
+3. 「CodePipeline」を開く。パイプラインは**作られた直後に1回、自動で実行される**
+   - `statuspage`：テストの段 → デプロイの段と進む（アプリのスタックがあるので、`CREATE_APP` が `false` のままでもデプロイされる）
+   - `statuspage-destroy`：Destroy の段のログで、`CONFIRM_DESTROY` が `true` ではないので消さずに終わったことを確かめる
+4. 手で作ったものを消す
+   - CodePipeline → `statuspage-manual` を削除
+   - CodeBuild →「ビルドプロジェクト」→ `statuspage-deploy-manual` を削除
+   - IAM →「ロール」→ 手順5で作られた2つのロール（パイプライン用と CodeBuild 用）を削除
+   - 接続 `statuspage-github` と、パラメータストアの2つの値は **消さない**（CDK のパイプラインが使う）
+
+- `StatuspagePipeline` は、ほかのスタックと参照し合わない。学習を終えるときも消さない（止まっている間は無料）
+- パイプラインの設定を変えたいときは、`pipeline-stack.ts` を直して、手元から `cdk deploy StatuspagePipeline` する
+
+- [ ] 完了
+
+## 8. 実験A：アプリを変えて、自動でデプロイする
 
 > 📖 **実験のあとに読む**
-> - [study §8 ローリング更新とロールバック](phase6-study.md#8-ローリング更新とロールバック)：「ローリング更新」「cfn-signal」
+> - [study §9 ローリング更新とロールバック](phase6-study.md#9-ローリング更新とロールバック)：「ローリング更新」「cfn-signal」
 
 予想してから実行する。
 
@@ -294,8 +323,8 @@ git commit -am "Phase 6: 実験A 見出しを変える"
 git push -u origin change-title
 ```
 
-3. GitHub で、このブランチからプルリクエストを作る。動いたジョブと、飛ばされたジョブを見る
-4. テストが通ったら「Merge pull request」でマージする。「Actions」で、main への push で動いた実行を開く
+3. GitHub で、このブランチからプルリクエストを作る。GitHub Actions のテストが動くことと、CodePipeline が動かないことを確かめる
+4. テストが通ったら「Merge pull request」でマージする。CodePipeline の `statuspage` が動き出すのを見る
 5. 手順1のターミナルと、EC2 の「インスタンス」画面と、CloudFormation の「イベント」タブを見る
 6. 終わったらブラウザでページを開き、見出しが変わっていることを確認する。手元を main に戻す
 
@@ -306,14 +335,14 @@ git pull
 
 考えること：
 
-- プルリクエストのときと、マージしたときで、動いたジョブはどう違ったか
+- プルリクエストのときと、マージしたときで、動いたもの（GitHub Actions、CodePipeline）はどう違ったか
 - 入れ替えの途中で、`/healthz` が答えなくなった時間はあったか。古いバージョンと新しいバージョンが混ざった時間はあったか
 - api のインスタンスは、何台ずつ、どの順番で入れ替わったか。worker はどうか
-- push してから入れ替えが終わるまで、何分かかったか。どこに一番時間がかかったか
+- マージしてから入れ替えが終わるまで、何分かかったか。どこに一番時間がかかったか
 
 - [ ] 完了
 
-## 8. 実験B：テストが落ちる変更を出す
+## 9. 実験B：テストが落ちる変更を出す
 
 > 📖 **実験のあとに読む**
 > - [study §3 CI でテストを動かす](phase6-study.md#3-ci-でテストを動かす)：全体
@@ -328,30 +357,31 @@ git commit -am "Phase 6: 実験B テストを落とす"
 git push -u origin break-healthz
 ```
 
-2. プルリクエストを作り、どのジョブが失敗し、どのジョブが動かなかったかを見る。失敗したテストのログを読む
-3. **マージせずに**、プルリクエストを「Close pull request」で閉じる。手元を main に戻す
+2. プルリクエストを作り、どのジョブが失敗したかを見る。失敗したテストのログを読む
+3. **マージせずに**、プルリクエストを「Close pull request」で閉じ、ブランチを消す
 
 ```bash
 git switch main
+git push origin --delete break-healthz
+git branch -D break-healthz
 ```
-
-- ブランチ `break-healthz` は、手順10で使うのでまだ消さない
 
 考えること：
 
 - テストが落ちたとき、AWS で動いているアプリには何が起きたか
-- このプルリクエストをマージしていたら、どうなったか。マージできないようにするには、どうすればよいか（[付録 A](phase6-appendix.md#a-ブランチを保護する)）
+- このプルリクエストをマージしていたら、どうなったか。パイプラインのどこで止まったか
+- マージできないようにするには、どうすればよいか（[付録 A](phase6-appendix.md#a-ブランチを保護する)）
 
 - [ ] 完了
 
-## 9. 実験C：起動に失敗するバージョンをデプロイする
+## 10. 実験C：起動に失敗するバージョンをデプロイする
 
 > 📖 **実験のあとに読む**
-> - [study §8 ローリング更新とロールバック](phase6-study.md#8-ローリング更新とロールバック)：「ロールバック」
+> - [study §9 ローリング更新とロールバック](phase6-study.md#9-ローリング更新とロールバック)：「ロールバック」
 
 予想してから実行する。テストでは見つからない失敗（存在しないコミット）を、手元から直接デプロイする。
 
-1. 手順7-1 と同じように、`/healthz` を見続ける
+1. 手順8-1 と同じように、`/healthz` を見続ける
 2. `infra/` の中で、存在しないコミット SHA を渡してデプロイする
 
 macOS：
@@ -369,95 +399,70 @@ npx cdk deploy StatuspageApp --profile study -c allowedCidrs="$myip/32" -c appVe
 ```
 
 3. CloudFormation の「イベント」タブで、何が起きたかを追う。新しく起動したインスタンスの「システムログ」（EC2 →「アクション」→「モニタリングとトラブルシューティング」→「システムログを取得」）で、ユーザーデータがどこで止まったかを見る
-4. 終わったら、GitHub の「Actions」→「CI/CD」→「Run workflow」（main）で、正しいバージョンに戻す
+4. 終わったら、CodePipeline の `statuspage` で「変更をリリース」し、正しいバージョンに戻す
 
 考えること：
 
 - `cdk deploy` は成功したか、失敗したか。スタックは最後にどの状態になったか
 - 途中で、`/healthz` が答えなくなった時間はあったか。それはなぜか
 - worker は、入れ替えの間どうなったか
-- 手順4で Run workflow するのは、なぜか（手元から `appVersion` なしで `deploy` すると、どうなるか）
+- 手順4で「変更をリリース」するのは、なぜか（手元から `appVersion` なしで `deploy` すると、どうなるか）
 
 - [ ] 完了
 
-## 10. 実験D：main 以外のブランチからデプロイしようとする
+## 11. 実験D：パイプラインが動かない変更
 
 > 📖 **実験のあとに読む**
-> - [study §6 環境とシークレット](phase6-study.md#6-環境とシークレット)：「環境」
-> - [study §4 OIDC で AWS に入る](phase6-study.md#4-oidc-で-aws-に入る)：「トークンの中身」
+> - [study §5 CodePipeline の仕組み](phase6-study.md#5-codepipeline-の仕組み)：「トリガー」
 
 予想してから実行する。
 
-1. 手順8のブランチ `break-healthz` を、`api.py` を元に戻したうえで push し直す（テストは通る状態にする）
+1. main 以外のブランチに、アプリの変更を push する（プルリクエストは作らない）
 
 ```bash
-git switch break-healthz
-git restore --source main app/statuspage/api.py
-git commit -am "Phase 6: 実験D テストを通す"
-git push
-git switch main
+git switch -c try-branch
+echo "# try" >> app/README-try.md
+git add app/README-try.md
+git commit -m "Phase 6: 実験D ブランチに push"
+git push -u origin try-branch
 ```
 
-2. 「Actions」→「CI/CD」→「Run workflow」で、Branch に `break-healthz` を選んで実行する
-3. `deploy` のジョブの表示とエラーを読む
-4. 終わったら、ブランチを消す
+2. CodePipeline の `statuspage` の実行履歴を見る
+3. main に戻り、`docs/` だけを変えて push する（例：`docs/log/` 以外の文書の誤字を直す）。もう一度、実行履歴と GitHub Actions を見る
+4. ブランチを消す
 
 ```bash
-git push origin --delete break-healthz
-git branch -D break-healthz
+git switch main
+git push origin --delete try-branch
+git branch -D try-branch
 ```
 
 考えること：
 
-- `deploy` は、どこで止められたか。AWS まで届いたか
-- もし環境 `aws` の「Deployment branches」の設定がなかったら、このジョブは AWS に入れたか。信頼ポリシーの `sub` は、ブランチを区別しているか
-
-- [ ] 完了
-
-## 11. OIDC の設定を CDK でコード化する
-
-> 📖 **先に読む**
-> - [study §9 OIDC の設定をコード化する](phase6-study.md#9-oidc-の設定をコード化する)：全体
->
-> 読んだら考える：`StatuspageGithub` スタックを、GitHub Actions からではなく手元からデプロイするのはなぜか
-
-1. `infra/lib/github-stack.ts` を読み、手順3・4で手作業でしたことのどれに当たるかを対応させる
-2. 手で作ったものを消す（同じ名前・同じ URL のものは2つ作れないため）
-   - IAM →「ロール」→ `statuspage-github-deploy` を削除
-   - IAM →「ID プロバイダ」→ `token.actions.githubusercontent.com` を削除
-3. `infra/` の中でデプロイする
-
-```bash
-npx cdk diff StatuspageGithub --profile study
-npx cdk deploy StatuspageGithub --profile study
-```
-
-4. GitHub の「Actions」→「CI/CD」→「Run workflow」（main）で、デプロイが通ることを確かめる
-
-- ロールの名前が同じなので、ARN も同じ。GitHub のシークレット `AWS_ROLE_ARN` は変えなくてよい
-- `StatuspageGithub` は、ほかのスタックと参照し合わない。学習を終えるときも消さない（無料）
+- 1 と 3 で、パイプラインは動いたか。それは、パイプラインのどの設定のためか
+- GitHub Actions はどうだったか。パイプラインとで、動く条件はどう違うか
 
 - [ ] 完了
 
 ## 12. 毎回の終わりに
 
 > 📖 **先に読む**
-> - [study §11 費用](phase6-study.md#11-費用)：全体
+> - [study §12 費用](phase6-study.md#12-費用)：全体
 >
 > 読んだら考える：Phase 5 の「毎回の終わり」と比べて、手元の PC に必要なものはどう変わったか
 
 ### 学習を終えるとき
 
-1. GitHub の「Actions」→「Destroy app」→「Run workflow」（main）
+1. 「CodePipeline」→ `statuspage-destroy` →「変更をリリース」。変数 `CONFIRM_DESTROY` を `true` にする
 2. RDS：`statuspage-db` を「アクション」→「一時的に停止」（最長7日）
 
 ### 学習を始めるとき
 
-1. 場所が変わったら、GitHub の環境 `aws` のシークレット `ALLOWED_CIDRS` を更新する
+1. 場所が変わったら、パラメータストアの `/statuspage/allowed-cidrs` を更新する
 2. RDS：「開始」→「利用可能」になるまで待つ
-3. GitHub の「Actions」→「CI/CD」→「Run workflow」（main）
+3. 「CodePipeline」→ `statuspage` →「変更をリリース」。変数 `CREATE_APP` を `true` にする
 
-- 手元から `cdk deploy` するときは、`-c appVersion=$(git rev-parse HEAD)` を付ける（付けないと `main` になり、GitHub Actions が入れたバージョンと違うので、インスタンスが入れ替わる）。手元のコミットは、先に push しておく（インスタンスは GitHub からコードを取ってくる）
+- 手元から `cdk deploy` するときは、`-c appVersion=$(git rev-parse HEAD)` を付ける（付けないと `main` になり、パイプラインが入れたバージョンと違うので、インスタンスが入れ替わる）。手元のコミットは、先に push しておく（インスタンスは GitHub からコードを取ってくる）
 - 1週間以上空けるときは、RDS を停止したままにしない（7日で自動で起動する）
 
 - [ ] 理解した
@@ -465,16 +470,16 @@ npx cdk deploy StatuspageGithub --profile study
 ## 13. Phase 6 の片付け
 
 > 📖 **先に読む**
-> - [study §12 ほかの Phase とのつながり](phase6-study.md#12-ほかの-phase-とのつながり)：「この構成の弱点と、解決する Phase」
+> - [study §13 ほかの Phase とのつながり](phase6-study.md#13-ほかの-phase-とのつながり)：「この構成の弱点と、解決する Phase」
 >
 > 読んだら考える：実験Aで、入れ替えに一番時間がかかったのはどこか。Phase 7 でコンテナにすると、そこはどう変わるか
 
-Phase 7 でも、ここまでのスタックと GitHub の設定を使う。手順12の「学習を終えるとき」の状態にしておく。
+Phase 7 でも、ここまでのスタックとパイプラインを使う。手順12の「学習を終えるとき」の状態にしておく。
 
-1. 「Destroy app」で `StatuspageApp` を消す
+1. `statuspage-destroy` で `StatuspageApp` を消す（`CONFIRM_DESTROY` を `true`）
 2. RDS を停止する
 
-- `StatuspageGithub`、GitHub の環境・シークレット・変数は残す
+- `StatuspagePipeline`、接続、パラメータストアの値は残す
 
 - [ ] `StatuspageApp` を削除
 - [ ] RDS を停止

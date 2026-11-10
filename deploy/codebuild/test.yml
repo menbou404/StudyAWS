@@ -1,0 +1,24 @@
+version: 0.2
+
+phases:
+  install:
+    # EC2・Docker と実行環境をそろえ、ロックファイルどおりに依存を入れる。
+    runtime-versions:
+      nodejs: 24
+      python: 3.13
+    commands:
+      # PATH の書き換えに頼らず、後のフェーズでも同じ uv を使う。
+      - curl -LsSf https://astral.sh/uv/0.13.5/install.sh | env UV_INSTALL_DIR=/usr/local/bin UV_NO_MODIFY_PATH=1 sh
+      - cd "$CODEBUILD_SRC_DIR/app"
+      - uv sync --locked
+      - cd "$CODEBUILD_SRC_DIR/infra"
+      - npm ci
+  build:
+    commands:
+      # GitHub Actions の結果に依存せず、デプロイするコミットをもう一度確かめる。
+      - cd "$CODEBUILD_SRC_DIR/app"
+      - uv run pytest
+      - cd "$CODEBUILD_SRC_DIR/infra"
+      - npm test
+      # テスト用ロールには AWS の操作権限を渡さずに生成する。
+      - npx cdk synth --quiet

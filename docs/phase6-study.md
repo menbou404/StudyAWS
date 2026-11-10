@@ -1,4 +1,4 @@
-# Phase 6 知識まとめ: CI/CD・GitHub Actions・OIDC
+# Phase 6 知識まとめ: CI/CD・GitHub Actions・CodePipeline
 
 > Phase 6 で出てきた知識を体系的にまとめたもの。手順は [phase6-setup.md](phase6-setup.md)。
 
@@ -7,16 +7,17 @@
 1. [CI/CD とは](#1-cicd-とは)
 2. [GitHub Actions の基本](#2-github-actions-の基本)
 3. [CI でテストを動かす](#3-ci-でテストを動かす)
-4. [OIDC で AWS に入る](#4-oidc-で-aws-に入る)
-5. [GitHub Actions 用の IAM ロール](#5-github-actions-用の-iam-ロール)
-6. [環境とシークレット](#6-環境とシークレット)
-7. [デプロイの流れ](#7-デプロイの流れ)
-8. [ローリング更新とロールバック](#8-ローリング更新とロールバック)
-9. [OIDC の設定をコード化する](#9-oidc-の設定をコード化する)
-10. [公開リポジトリで CI/CD を扱う](#10-公開リポジトリで-cicd-を扱う)
-11. [費用](#11-費用)
-12. [ほかの Phase とのつながり](#12-ほかの-phase-とのつながり)
-13. [理解度チェック](#13-理解度チェック)
+4. [AWS の CI/CD サービス](#4-aws-の-cicd-サービス)
+5. [CodePipeline の仕組み](#5-codepipeline-の仕組み)
+6. [CodeBuild とデプロイの権限](#6-codebuild-とデプロイの権限)
+7. [外から AWS に入る方法と OIDC](#7-外から-aws-に入る方法と-oidc)
+8. [デプロイの流れ](#8-デプロイの流れ)
+9. [ローリング更新とロールバック](#9-ローリング更新とロールバック)
+10. [パイプラインをコード化する](#10-パイプラインをコード化する)
+11. [公開リポジトリで CI/CD を扱う](#11-公開リポジトリで-cicd-を扱う)
+12. [費用](#12-費用)
+13. [ほかの Phase とのつながり](#13-ほかの-phase-とのつながり)
+14. [理解度チェック](#14-理解度チェック)
 
 ---
 
@@ -36,19 +37,19 @@
 | | 手元から手でデプロイ | CI/CD |
 |---|---|---|
 | テスト | 忘れることがある | 毎回必ず動く。落ちたら先に進まない |
-| どの PC から | 認証情報と道具（Node.js など）がそろった PC だけ | どこからでも（GitHub の画面だけでよい） |
+| どの PC から | 認証情報と道具（Node.js など）がそろった PC だけ | どこからでも（画面のボタンだけでよい） |
 | 何をデプロイしたか | 手元のファイル（コミットしていない変更が混ざることがある） | Git のコミット。記録が残る |
 | 権限 | 自分の強い権限で実行する | デプロイに必要な分だけの権限で実行する |
 | 手順の間違い | 起こりうる | 毎回同じ手順 |
 
 ### このプロジェクトの流れ
 
-| きっかけ | 動くもの |
-|---|---|
-| プルリクエストを作る・更新する | テスト（app・infra）だけ |
-| main に push（マージ）する | テスト → 通ったらデプロイ（アプリのスタックがあるときだけ） |
-| 「Run workflow」を押す | テスト → デプロイ（スタックがなければ作る） |
-| 「Destroy app」を押す | アプリのスタックを消す |
+| きっかけ | GitHub Actions（CI） | CodePipeline（CD） |
+|---|---|---|
+| プルリクエストを作る・更新する | テスト | 動かない |
+| main に push（マージ）する | テスト | テスト → デプロイ（アプリのスタックがあるときだけ） |
+| `statuspage` で「変更をリリース」（`CREATE_APP=true`） | — | テスト → デプロイ（スタックがなければ作る） |
+| `statuspage-destroy` で「変更をリリース」（`CONFIRM_DESTROY=true`） | — | アプリのスタックを消す |
 
 テストが通れば人を通さずに出すので、main への push は「継続的デプロイ」にあたる。
 
@@ -77,9 +78,9 @@
 | `paths:` | 指定したファイルが変わったときだけ動く（`docs/` だけの変更では動かさない、など） |
 | `needs: [a, b]` | ジョブ a と b が成功してから動く。書かないジョブ同士は同時に動く |
 | `if:` | 条件を満たすときだけ動く。満たさないと「skipped」になる |
-| `permissions:` | このワークフローが使う GitHub のトークン（`GITHUB_TOKEN`）の権限。必要なものだけにする |
-| `concurrency:` | 同じグループの実行を同時に動かさない。デプロイが重ならないようにする |
-| `${{ secrets.X }}`・`${{ vars.X }}` | シークレット・変数を読む（§6） |
+| `permissions:` | このワークフローが使う GitHub のトークン（`GITHUB_TOKEN`）の権限。必要なものだけにする（`contents: read` ならコードを読むだけ） |
+| `concurrency:` | 同じグループの実行を同時に動かさない |
+| `${{ secrets.X }}`・`${{ vars.X }}` | シークレット・変数を読む |
 
 ### ランナーは毎回まっさら
 
@@ -93,26 +94,26 @@
 
 ### 何を確かめるか
 
-| ジョブ | 確かめること |
-|---|---|
-| app のテスト | `uv run pytest`：API と監視ジョブが期待どおりに動くか |
-| infra のテスト | `npm test`：CDK のテンプレートが守りたいルール（DB に入れるのは web と worker だけ、など）を満たすか |
-| infra の synth | `cdk synth`：CDK のコードからテンプレートを作れるか（AWS には触らない） |
+| 確かめるもの | コマンド | 内容 |
+|---|---|---|
+| アプリ | `uv run pytest` | API と監視ジョブが期待どおりに動くか |
+| CDK のテスト | `npm test` | テンプレートが守りたいルール（DB に入れるのは web と worker だけ、など）を満たすか |
+| CDK の synth | `cdk synth` | CDK のコードからテンプレートを作れるか |
 
 ### ロックファイルどおりに入れる
 
 | コマンド | 意味 |
 |---|---|
-| `uv sync --locked` | `uv.lock` とずれていたら失敗する。勝手に新しいバージョンを入れない |
+| `uv sync --locked` | `uv.lock` と `pyproject.toml` が食い違っていたら、勝手に直さずに失敗する |
 | `npm ci` | `package-lock.json` どおりに入れる。ずれていたら失敗する |
 
 CI で入れるライブラリが手元と違うと、「CI では通ったのに本番で壊れる」「昨日は通ったのに今日は落ちる」が起きる。ロックファイルどおりに入れれば、誰がいつ実行しても同じになる。
 
 ### テストが落ちたら
 
-- `needs:` でつながった後ろのジョブ（デプロイ）は動かない。AWS で動いているものは何も変わらない
 - プルリクエストの画面に ✕ が付き、どのテストが落ちたかをログで読める
 - ただし、✕ が付いてもマージボタンは押せてしまう。「テストが通らないとマージできない」にするには、ブランチの保護（ルールセット）を設定する（[付録 A](phase6-appendix.md#a-ブランチを保護する)）
+- マージしてしまっても、パイプラインのテストの段でもう一度テストして、落ちればデプロイの段に進まない。AWS で動いているものは何も変わらない
 
 ### テストで見つからない失敗
 
@@ -121,79 +122,113 @@ CI で入れるライブラリが手元と違うと、「CI では通ったの�
 - 本番の環境でだけ起きる失敗（パッケージが入らない、設定ファイルがない、DB につながらない）
 - テストを書いていない動き
 
-これに備えるのが、デプロイの途中で本物のインスタンスが動くかを確かめて、だめなら元に戻す仕組み（§8）。
+これに備えるのが、デプロイの途中で本物のインスタンスが動くかを確かめて、だめなら元に戻す仕組み（§9）。
 
 ---
 
-## 4. OIDC で AWS に入る
+## 4. AWS の CI/CD サービス
 
-### アクセスキーを渡す方法の問題
-
-GitHub Actions から AWS を操作するには、AWS の認証情報が必要になる。昔は、IAM ユーザーのアクセスキーを GitHub のシークレットに入れていた。
-
-| 問題 | 内容 |
-|---|---|
-| 長く使える | アクセスキーは消すまで有効。漏れたら、気づくまで使われ続ける |
-| 漏れる場所が多い | GitHub のシークレット、ログ、手元の PC など |
-| 入れ替えが手間 | 定期的に作り直して、シークレットを更新する必要がある |
-
-### OIDC の仕組み
-
-**OIDC（OpenID Connect）は、「ある人（やジョブ）が誰か」を、信頼できる発行元が署名したトークンで証明する仕組み。** GitHub Actions のジョブは、GitHub が署名した「このジョブは、このリポジトリの、この環境のものです」というトークンをもらえる。
-
-| 順番 | 誰が | 何をする |
+| サービス | 役割 | GitHub Actions でいうと |
 |---|---|---|
-| 1 | AWS（事前に1回） | IAM に「GitHub が署名したトークンを信用する」と登録しておく（ID プロバイダー） |
-| 2 | GitHub Actions のジョブ | GitHub から ID トークンをもらう（ワークフローに `permissions: id-token: write` が必要） |
-| 3 | ジョブ | トークンを AWS STS に渡して、「このロールを引き受けたい」と頼む（`AssumeRoleWithWebIdentity`） |
-| 4 | AWS STS | 署名が GitHub のものか、トークンの中身がロールの信頼ポリシーの条件に合うかを確かめる |
-| 5 | AWS STS | 合えば、一時的な認証情報（1時間など）を返す |
+| **CodePipeline** | 「ソース → テスト → デプロイ」の流れを管理する | ワークフロー |
+| **CodeBuild** | コマンドを動かす使い捨てのマシン。手順は buildspec に書く | ランナーとジョブ |
+| **CodeConnections**（接続） | AWS が GitHub などのリポジトリを読み、push を受け取れるようにする | （GitHub の中なので不要） |
+| CodeDeploy | EC2・ECS・Lambda へのデプロイ（ブルー/グリーンなど）を行う。このプロジェクトでは使わない（[付録 C](phase6-appendix.md#c-インスタンスの入れ替え方の比較)） | — |
 
-- アクセスキーをどこにも保存しない。漏れて困るものが GitHub に置かれない
-- 認証情報は一時的で、ジョブが終わればすぐ使えなくなる
-- Phase 0 の `aws login` や、Phase 2 の EC2 の IAM ロールと同じく、「一時的な認証情報をもらう」考え方
+### 接続（CodeConnections）
 
-### トークンの中身
+- 接続を作ると、GitHub 側に「AWS Connector for GitHub」というアプリが入る。AWS はこのアプリの権限で、リポジトリの中身を読み、push の知らせを受け取る
+- アプリに許可するリポジトリは、**必要なものだけ**（Only select repositories）にする。全部を許可すると、関係ないリポジトリ（非公開のものも）まで AWS から読めるようになる
+- 接続は CloudFormation でも作れるが、作った直後は「保留中」で、GitHub での許可は人が画面で行う必要がある
 
-ID トークン（JWT という形式）には、次のような項目（クレーム）が入っている。
+### GitHub Actions と CodePipeline の比べ方
 
-| クレーム | 意味 | 例 |
+| | GitHub Actions | CodePipeline + CodeBuild |
 |---|---|---|
-| `iss` | 発行元 | `https://token.actions.githubusercontent.com` |
-| `aud` | 誰に向けたトークンか | `sts.amazonaws.com` |
-| `sub` | 誰か（どのリポジトリの、どのジョブか） | `repo:<owner>/<repo>:environment:aws` |
-| `ref` | どのブランチか | `refs/heads/main` |
-| `environment` | どの環境か | `aws` |
+| 動く場所 | GitHub のマシン | 自分の AWS アカウントの中 |
+| AWS への入り方 | 外から入る（OIDC やアクセスキー） | 最初から中にいる（IAM ロール） |
+| ログ | 公開リポジトリなら、GitHub にログインしている人が誰でも見られる | 自分の AWS アカウントの CloudWatch Logs。外からは見えない |
+| 料金 | 公開リポジトリは無料 | 動いた時間の分だけ |
+| 向いているとき | プルリクエストごとの確認、GitHub の画面で完結させたい | AWS の中で完結させたい、複数の AWS アカウントに順番に出す |
 
-`sub` の形は、ジョブによって変わる。
-
-| ジョブ | `sub` |
-|---|---|
-| 環境（`environment:`）を使うジョブ | `repo:<owner>/<repo>:environment:<環境名>` |
-| 環境を使わず、ブランチへの push で動いたジョブ | `repo:<owner>/<repo>:ref:refs/heads/<ブランチ名>` |
-| プルリクエストで動いたジョブ | `repo:<owner>/<repo>:pull_request` |
-
-環境を使うジョブの `sub` には、ブランチ名が入らない。ブランチを絞るのは GitHub 側の環境の設定（§6）の役目になる。
+このプロジェクトでは、プルリクエストの確認（CI）は GitHub Actions、デプロイ（CD）は CodePipeline と分けている。
 
 ---
 
-## 5. GitHub Actions 用の IAM ロール
+## 5. CodePipeline の仕組み
 
-IAM ロールには、2つのポリシーがある（[Phase 2 §6](phase2-study.md#6-iam-ロールと-ec2)）。
-
-| ポリシー | 決めること | GitHub Actions 用のロールでは |
+| 言葉 | 意味 | このプロジェクトでは |
 |---|---|---|
-| 信頼ポリシー | **誰が**このロールを引き受けられるか | GitHub の ID プロバイダー経由で、`aud` が `sts.amazonaws.com`、`sub` が自分のリポジトリの環境 `aws` のジョブだけ |
-| 許可ポリシー | 引き受けた人が**何をできるか** | CDK 用のロールを引き受けること、アプリのスタックがあるか調べることだけ |
+| パイプライン | 流れ全体 | `statuspage`、`statuspage-destroy` |
+| ステージ | 流れの1段。前のステージが成功したら次に進む | Source → Test → Deploy |
+| アクション | ステージの中で行う1つの作業 | 「GitHub から取ってくる」「CodeBuild でテストする」など |
+| アーティファクト | ステージの間で受け渡すファイル（S3 に置かれる） | ソースで取ってきたリポジトリの中身 |
+| 変数 | 実行のたびに決まる値。`#{名前空間.変数名}` で参照する | `#{SourceVariables.CommitId}`（コミット SHA）、`#{variables.CREATE_APP}` |
+| 実行 | パイプラインを1回動かすこと。「変更をリリース」で手でも始められる | — |
 
-### 信頼ポリシーの条件
+### トリガー
 
-| 条件 | 書かなかったら |
+V2 のパイプラインは、**どんな push で動くか** を絞れる。
+
+| 絞り方 | このプロジェクトでは |
 |---|---|
-| `aud` = `sts.amazonaws.com` | AWS 以外に向けたトークンでも通ってしまう |
-| `sub` = 自分のリポジトリの環境 `aws` | **GitHub のどのリポジトリのジョブでも**、このロールを引き受けられてしまう |
+| ブランチ | `main` だけ。ほかのブランチへの push では動かない |
+| ファイルパス | `app/**`・`infra/**`・`deploy/**` が変わったときだけ。`docs/` だけの変更では動かない |
+| プルリクエスト | 使わない（プルリクエストの確認は GitHub Actions） |
 
-`sub` に `StringLike` と `*` を使う（`repo:<owner>/*` など）と、絞ったつもりで広く開けてしまうことがある。完全一致（`StringEquals`）にする。
+### 変数
+
+パイプラインに変数を決めておくと、「変更をリリース」で手で動かすときに値を変えられる。push で動いたときはデフォルト値が使われる。
+
+| 変数 | デフォルト | 意味 |
+|---|---|---|
+| `CREATE_APP`（`statuspage`） | `false` | アプリのスタックがないときに作るか。push のときは `false` なので、学習していない日に勝手に作られない |
+| `CONFIRM_DESTROY`（`statuspage-destroy`） | `false` | 本当にアプリのスタックを消すか。押し間違いや、作成直後の自動の実行では消さない |
+
+### 作成直後の実行
+
+パイプラインは、**作られた直後に1回、自動で実行される**（トリガーを付けていなくても）。CloudFormation や CDK で作ったときも同じ。
+
+- 「消す」「本番に出す」のような影響の大きいパイプラインは、最初の実行で何が起きるかを考えておく
+- このプロジェクトでは、変数の既定値を安全な側（`false`）にして、最初の実行では何もしないで終わるようにしている
+
+### 実行モード
+
+| モード | 動き |
+|---|---|
+| SUPERSEDED（V1 の既定） | 新しい実行が来たら、待っている古い実行を追い越して捨てる |
+| **QUEUED**（このプロジェクト） | 来た順に1つずつ実行する。デプロイが重ならない |
+| PARALLEL | 同時に実行する |
+
+CloudFormation のスタックは同時に2つの更新を受け付けないので、デプロイは QUEUED にして順番に流す。
+
+---
+
+## 6. CodeBuild とデプロイの権限
+
+### buildspec
+
+CodeBuild で動かす手順は、**buildspec**（YAML）に書く。このプロジェクトでは `deploy/codebuild/` に置いている。
+
+| 項目 | 意味 |
+|---|---|
+| `env.variables` | 決まった値の環境変数 |
+| `env.parameter-store` | パラメータストアから読む環境変数 |
+| `phases.install` | 道具を入れる（`runtime-versions` で Node.js や Python のバージョンを選ぶ） |
+| `phases.build` | 本番の作業（テスト、`cdk deploy` など） |
+
+- CodeBuild のマシンも、GitHub Actions のランナーと同じく毎回まっさら
+- イメージ（マシンの土台）は AWS が用意したものを選ぶ。このプロジェクトでは Amazon Linux 2023 の ARM 版（EC2 と同じ CPU の種類）
+
+### ビルドのロール
+
+CodeBuild のプロジェクトには、IAM ロール（サービスロール）を付ける。Phase 2 で EC2 にロールを付けたのと同じで、ビルドの中の AWS CLI や CDK は、そのロールの一時的な認証情報で動く。**アクセスキーはどこにもない**。
+
+| プロジェクト | ロールに付ける権限 |
+|---|---|
+| テスト | ログを書く、アーティファクトを読むだけ（AWS のリソースには触らない） |
+| デプロイ | CDK のロールを引き受ける、アプリのスタックがあるか調べる、IP アドレスのパラメータを読む |
+| 削除 | CDK のロールを引き受ける |
 
 ### CDK のロールを引き受ける
 
@@ -203,83 +238,85 @@ IAM ロールには、2つのポリシーがある（[Phase 2 §6](phase2-study.
 |---|---|
 | `deploy-role` | CloudFormation にテンプレートを渡して、スタックを作る・変える・消す |
 | `file-publishing-role` | テンプレートやファイル（アセット）を S3 に置く |
-| `lookup-role` | AZ の一覧など、AWS に問い合わせる（`cdk.context.json` がないとき） |
+| `lookup-role` | AZ の一覧など、AWS に問い合わせる |
 | `cfn-exec-role` | CloudFormation が実際にリソースを作るときに使う（既定は AdministratorAccess） |
 
-GitHub Actions 用のロールには、EC2 や ALB を作る権限を直接付けない。`deploy-role` などを引き受ける権限だけを付ければ、`cdk deploy` ができる。ブートストラップのロールは、同じアカウントの中から引き受けられるように作られている。
+デプロイのロールには、EC2 や ALB を作る権限を直接付けない。`deploy-role` などを引き受ける権限だけを付ければ、`cdk deploy` ができる。ブートストラップのロールは、同じアカウントの中から引き受けられるように作られている。
 
 ### 気をつけること：実質は強い権限
 
 | 順番 | 権限 |
 |---|---|
-| GitHub Actions 用のロール | CDK のロールを引き受けるだけ |
+| デプロイのロール | CDK のロールを引き受けるだけ |
 | → `deploy-role` | CloudFormation のスタックを操作する |
 | → `cfn-exec-role` | **AdministratorAccess**（何でも作れる） |
 
-テンプレートに書けば何でも作れるので、**GitHub Actions からデプロイできる人は、実質的にアカウントの管理者に近い**。だから「誰がデプロイのジョブを動かせるか」を絞ることが大事になる。
+テンプレートに書けば何でも作れるので、**パイプラインでデプロイされるコード（main に入るもの）を変えられる人は、実質的にアカウントの管理者に近い**。
 
-- 信頼ポリシーの `sub` で、リポジトリと環境を絞る
-- 環境で、デプロイできるブランチを main に絞る（§6）
 - main に入るものを、プルリクエストとレビューで絞る（[付録 A](phase6-appendix.md#a-ブランチを保護する)）
+- 接続のアプリに許可するリポジトリを絞る
+- GitHub のアカウントに2段階認証を設定する
 - さらに絞るなら、ブートストラップで `cfn-exec-role` に付ける権限を必要な分だけにする
 
+### パラメータストア
+
+**Systems Manager パラメータストアは、設定の値を名前を付けて置いておける場所。**
+
+| | パラメータストア（標準） | Secrets Manager（Phase 3） |
+|---|---|---|
+| 向いているもの | 設定の値（IP アドレス、接続の ARN など） | パスワードなどの秘密 |
+| 暗号化 | 選べる（SecureString） | 必ず |
+| 自動のローテーション | なし | あり |
+| 料金 | 標準は無料 | 1つあたり月額 |
+
+- リポジトリに書かずに済むので、公開リポジトリに IP アドレスやアカウントID（ARN に入る）が載らない
+- 場所が変わって IP アドレスが変わっても、値を書き換えるだけでよい（コードは変えない）
+- CodeBuild は buildspec の `parameter-store` で、CDK は `ssm.StringParameter.valueForStringParameter` で、名前から値を読む
+
 ---
 
-## 6. 環境とシークレット
+## 7. 外から AWS に入る方法と OIDC
 
-### 値の置き場所
+GitHub Actions のように AWS の**外**で動くものが AWS を操作するには、認証情報が必要になる。
 
-| 置き場所 | 見える範囲 | ログに出ると | 使うもの |
+| 方法 | 内容 | 問題 |
+|---|---|---|
+| IAM ユーザーのアクセスキー | 長く使える鍵を GitHub のシークレットに入れる | 消すまで有効。漏れたら、気づくまで使われ続ける。入れ替えが手間 |
+| **OIDC** | GitHub が署名した「このジョブは、このリポジトリのものです」というトークンを AWS に見せて、一時的な認証情報をもらう | 長く使える秘密がどこにも保存されない |
+
+### OIDC の仕組み
+
+**OIDC（OpenID Connect）は、「ある人（やジョブ）が誰か」を、信頼できる発行元が署名したトークンで証明する仕組み。**
+
+| 順番 | 誰が | 何をする |
+|---|---|---|
+| 1 | AWS（事前に1回） | IAM に「GitHub が署名したトークンを信用する」と登録しておく（ID プロバイダー） |
+| 2 | GitHub Actions のジョブ | GitHub から ID トークンをもらう（ワークフローに `permissions: id-token: write` が必要） |
+| 3 | ジョブ | トークンを AWS STS に渡して、「このロールを引き受けたい」と頼む |
+| 4 | AWS STS | 署名と、トークンの中身（どのリポジトリの、どの環境のジョブか）がロールの信頼ポリシーの条件に合うかを確かめる |
+| 5 | AWS STS | 合えば、一時的な認証情報（1時間など）を返す |
+
+- 守る場所は AWS から GitHub に移る。main に push できる人、GitHub のアカウントを乗っ取った人は、AWS に入れる
+- 信頼ポリシーの条件（`sub`）を `*` で広く書くと、他人のリポジトリからも入れてしまう
+
+### 新方式のアカウントでは
+
+新方式（Sign up for AWS (new)）のアカウントでは、AWS が管理する SCP（サービスコントロールポリシー：アカウントでできることの上限を決めるポリシー）が `iam:*Provider*` を禁止している。**ID プロバイダーを作れないので、OIDC は使えない**（「高度な機能」を有効にすると使える。有効化は元に戻せない）。
+
+このプロジェクトでは、デプロイを AWS の中（CodeBuild）で動かすことで、外から入る必要そのものをなくしている。GitHub Actions から OIDC でデプロイする構成は、[付録 E](phase6-appendix.md#e-github-actions-から-oidc-でデプロイする) にまとめた。
+
+---
+
+## 8. デプロイの流れ
+
+パイプライン `statuspage` は、次の順番で進む。
+
+| 順番 | ステージ | すること | なぜ |
 |---|---|---|---|
-| ワークフローのファイル | 誰でも（公開リポジトリ） | そのまま出る | 秘密でない設定（リージョンなど） |
-| 変数（`vars`） | 設定画面を見られる人 | そのまま出る | 秘密でない値（`DEPLOY_ENABLED` など） |
-| リポジトリのシークレット | 誰も値を読めない。リポジトリのすべてのワークフローが使える | `***` に置き換わる | 秘密の値 |
-| 環境のシークレット | 誰も値を読めない。**その環境を使うジョブだけ**が使える | `***` に置き換わる | デプロイにだけ使う秘密の値（`AWS_ROLE_ARN`、`ALLOWED_CIDRS`） |
-
-- シークレットの値は、一度保存すると画面からも読めない（上書きだけできる）
-- ロールの ARN にはアカウントID が入る。IP アドレスとあわせて、公開リポジトリのファイルやログに出さないためにシークレットに入れる
-
-### 環境
-
-**環境（Environment）は、デプロイ先ごとに「誰が・どのブランチから・どの秘密を使って」デプロイできるかを決める仕組み。** ジョブに `environment: aws` と書くと、その環境のルールが適用される。
-
-| 設定 | 意味 |
-|---|---|
-| Deployment branches and tags | その環境を使えるブランチ。それ以外のブランチのジョブは、始まる前に止められる |
-| Environment secrets | その環境を使うジョブだけが読めるシークレット |
-| Required reviewers | 指定した人が承認するまで、ジョブが待つ（[付録 B](phase6-appendix.md#b-承認してからデプロイする)） |
-
-守りは2段になっている。
-
-| 段 | どこで | 何を確かめるか |
-|---|---|---|
-| 1 | GitHub（環境） | このブランチのジョブが、環境 `aws` を使ってよいか |
-| 2 | AWS（信頼ポリシー） | トークンの `sub` が、自分のリポジトリの環境 `aws` か |
-
-AWS 側の `sub` にはブランチ名が入らないので、「main だけ」を守っているのは GitHub 側の環境の設定。環境の設定を消すと、どのブランチからでも AWS に入れてしまう。
-
-### ログでのマスク
-
-- シークレットの値と**完全に同じ文字列**は、ログで `***` に置き換わる。一部分だけ（`a.a.a.a/32,b.b.b.b/32` のうちの `a.a.a.a/32`）は置き換わらない
-- ワークフローの中で `echo "::add-mask::値"` を実行すると、その値もマスクの対象にできる。IP アドレスを1つずつマスクするのはこのため
-- AWS の認証情報を設定するアクションには、アカウントID をマスクする設定（`mask-aws-account-id`）がある
-- 実行してから分かる値（ALB の DNS 名など）は、ログに出る前にマスクできないので、出力を書き換える（`sed` で伏せ字にする）
-
----
-
-## 7. デプロイの流れ
-
-`deploy` のジョブは、次の順番で進む。
-
-| 順番 | すること | なぜ |
-|---|---|---|
-| 1 | テストのジョブが両方成功するのを待つ（`needs:`） | 壊れた変更を出さない |
-| 2 | 環境 `aws` のルールを確かめる（GitHub） | main 以外からデプロイさせない |
-| 3 | コードを取ってくる、Node.js と依存を入れる | ランナーはまっさら |
-| 4 | IP アドレスをマスクする | 公開ログに出さない |
-| 5 | OIDC で AWS のロールを引き受ける | アクセスキーを使わない |
-| 6 | アプリのスタックがあるか調べる。push で動いていてスタックがなければ、ここで終わる | 学習していないときに、課金されるものを勝手に作らない |
-| 7 | `cdk deploy StatuspageApp -c allowedCidrs=... -c appVersion=<コミット SHA>` | Phase 5 と同じコマンド |
+| 1 | Source | main のコミットを GitHub から取ってくる。コミット SHA を変数にする | — |
+| 2 | Test | CodeBuild で pytest、`npm test`、`cdk synth` | GitHub Actions の結果は CodePipeline からは見えない。デプロイするコミットを、デプロイの直前にもう一度確かめる |
+| 3 | Deploy | アプリのスタックがあるか調べる。なくて `CREATE_APP` が `true` でなければ、ここで終わる | 学習していないときに、課金されるものを勝手に作らない |
+| 3 | Deploy | `cdk deploy StatuspageApp -c allowedCidrs=... -c appVersion=<コミット SHA>` | Phase 5 と同じコマンド |
 
 ### コミット SHA でバージョンを固定する
 
@@ -290,17 +327,18 @@ AWS 側の `sub` にはブランチ名が入らないので、「main だけ」�
 | `main`（ブランチ名） | 起動した**時刻**によって中身が変わる。デプロイの途中で main に別の変更が入ると、インスタンスごとにバージョンが違うことがある。Auto Scaling が後から足したインスタンスにも、テストしていない新しいコードが入る |
 | コミット SHA | どのインスタンスも、いつ起動しても、**テストしたものと同じコード**になる |
 
-- SHA（40文字の16進数）はコミットごとに違うので、デプロイのたびにユーザーデータが変わる。起動テンプレートの新しいバージョンができ、インスタンスが入れ替わる（§8）
+- SHA（40文字の16進数）はコミットごとに違うので、デプロイのたびにユーザーデータが変わる。起動テンプレートの新しいバージョンができ、インスタンスが入れ替わる（§9）
+- アプリのコードだけを変えても、SHA が変わるので `cdk diff` に差分が出る。Phase 5 の構成では、アプリだけを変えても差分が出ず、動いているインスタンスは古いままだった
 - 1度作ったものは変えず、変えるときは新しいものに入れ替える考え方を、**イミュータブル（不変）なインフラ** と言う
 - `appVersion` はユーザーデータ（シェルスクリプト）に埋め込まれるので、CDK のコードで「40文字の16進数か `main`」以外を拒否している。好きな文字列を入れられると、スクリプトにコマンドを差し込めてしまう
 
 ### デプロイの確認はどこでするか
 
-GitHub Actions のマシンは、ALB に入れない（セキュリティグループが自分の IP だけを許可しているため）。だから「新しいインスタンスがちゃんと動いたか」は、インスタンス自身が確かめて CloudFormation に知らせる（§8 の cfn-signal）。
+CodeBuild のマシンは、ALB に入れない（セキュリティグループが自分の IP だけを許可しているため）。だから「新しいインスタンスがちゃんと動いたか」は、インスタンス自身が確かめて CloudFormation に知らせる（§9 の cfn-signal）。
 
 ---
 
-## 8. ローリング更新とロールバック
+## 9. ローリング更新とロールバック
 
 ### 起動テンプレートを変えても、動いているインスタンスは変わらない
 
@@ -344,21 +382,37 @@ api は「2台を下回らない」ので、新しい1台を足して3台にし�
 | 新しく起動したインスタンス | 消される |
 | 古いインスタンス | （まだ残っていれば）そのまま動き続ける |
 | スタックの状態 | `UPDATE_ROLLBACK_COMPLETE`（更新に失敗し、元に戻した） |
-| `cdk deploy` | 失敗として終わる |
+| `cdk deploy` | 失敗として終わる。パイプラインならデプロイの段が失敗になる |
 
 ロールバックは、「テストで見つからない失敗」から本番を守る最後の網になる。ただし、新しいインスタンスの起動スクリプトが「成功」と言ったものは、すべて成功として扱う。何を確かめてから「成功」を送るかが大事になる。
 
 ---
 
-## 9. OIDC の設定をコード化する
+## 10. パイプラインをコード化する
 
-手作業で作った ID プロバイダーとロールを、CDK のスタック `StatuspageGithub` にする。
+手作業で作ったパイプラインを、CDK のスタック `StatuspagePipeline` にする。
 
 | 手作業 | CDK |
 |---|---|
-| ID プロバイダーを追加 | `iam.OidcProviderNative`（CloudFormation の `AWS::IAM::OIDCProvider` をそのまま使う L2） |
-| ロールの信頼ポリシー | `iam.WebIdentityPrincipal` と、`aud`・`sub` の条件 |
-| インラインポリシー | `role.addToPolicy(...)` |
+| パイプラインを作る | `codepipeline.Pipeline`（`pipelineType: V2`、`executionMode: QUEUED`） |
+| ソース（GitHub、接続） | `CodeStarConnectionsSourceAction` |
+| トリガーの条件 | パイプラインの `triggers`（ブランチとファイルパス） |
+| 変数 `CREATE_APP` | パイプラインの `variables` |
+| CodeBuild のプロジェクト | `codebuild.PipelineProject` と `CodeBuildAction` |
+| ロールのインラインポリシー | `project.addToRolePolicy(...)` |
+
+手作業にはなかったものも足している。
+
+- テストの段（デプロイの前に、もう一度テストする）
+- `statuspage-destroy`（アプリのスタックを消すパイプライン。push では動かず、手で動かして `CONFIRM_DESTROY` を `true` にしたときだけ消す）
+- パイプラインの受け渡し用の S3 バケットの、古いファイルを自動で消す設定
+
+### コード化しないもの
+
+| もの | 理由 | コードからの参照 |
+|---|---|---|
+| 接続 | GitHub での許可は画面で行う必要がある | パラメータストアの `/statuspage/github-connection-arn` から ARN を読む |
+| 自分の IP アドレス | 場所によって変わる。公開リポジトリに載せない | パラメータストアの `/statuspage/allowed-cidrs` から読む |
 
 ### スタックを分ける理由
 
@@ -366,53 +420,59 @@ api は「2台を下回らない」ので、新しい1台を足して3台にし�
 |---|---|
 | 寿命が違う | 一度作ればずっと使う。アプリのスタックのように毎日消さない |
 | 参照がない | ほかのスタックとは関係しない |
-| デプロイする人が違う | GitHub Actions ではなく、手元から管理者がデプロイする |
+| デプロイする人が違う | パイプラインではなく、手元から管理者がデプロイする |
 
 ### 手元からデプロイする理由
 
-GitHub Actions に `StatuspageGithub` をデプロイさせると、ワークフローを書き換えれば「GitHub Actions 用のロールの権限を、GitHub Actions 自身が広げる」ことができてしまう。自分の権限を決めるものは、自分では変えられないようにしておく。
+パイプラインに `StatuspagePipeline` 自身をデプロイさせると、main に入ったコードで「パイプラインのロールの権限を、パイプライン自身が広げる」ことができてしまう。自分の権限を決めるものは、自分では変えられないようにしておく（パイプライン自身も更新する仕組みは CDK Pipelines にある。[付録 F](phase6-appendix.md#f-cdk-pipelines)）。
 
 ### 物理名を付ける
 
-ロールの名前は `statuspage-github-deploy` に固定する。GitHub のシークレット `AWS_ROLE_ARN` が名前（ARN）で探すので、Phase 5 の「外から名前で探されるものには物理名を付ける」に当たる。作り直しても ARN が変わらず、シークレットを更新しなくてよい。
+パイプラインの名前は `statuspage`・`statuspage-destroy` に固定する。人がコンソールで名前を見て「変更をリリース」を押すので、Phase 5 の「外から名前で探されるものには物理名を付ける」に当たる。
 
 ---
 
-## 10. 公開リポジトリで CI/CD を扱う
+## 11. 公開リポジトリで CI/CD を扱う
 
 | 気をつけること | 内容 | 対策 |
 |---|---|---|
-| ログは誰でも見られる | 公開リポジトリの Actions のログは、GitHub にログインしている人なら誰でも見られる | 秘密はシークレットに。シークレットの一部や、実行後に分かる値は自分でマスクする |
-| フォークからのプルリクエスト | 他人がフォークして出したプルリクエストでもワークフローが動く | `pull_request` では、シークレットと OIDC のトークンは渡されない。デプロイは環境 `aws` で main に絞る |
-| `pull_request_target` | フォークのプルリクエストでも、シークレットが使える状態で動くイベント | 使わない。使うなら、プルリクエストのコードを取ってきて実行しない |
-| 他人のアクション | `uses:` で使うアクションは他人のコード。中身が変わると、シークレットを盗まれることがある | 信頼できる発行元のものだけ使う。バージョンを固定する（[付録 D](phase6-appendix.md#d-アクションのバージョンを固定する)） |
-| `GITHUB_TOKEN` の権限 | 既定のままだと、リポジトリに書き込めることがある | `permissions:` で必要な分（`contents: read` など）だけにする |
+| GitHub Actions のログは公開 | 公開リポジトリの Actions のログは、GitHub にログインしている人なら誰でも見られる | テストのジョブには秘密を渡さない。デプロイは AWS の中（ログは CloudWatch Logs で非公開） |
+| フォークからのプルリクエスト | 他人がフォークして出したプルリクエストでも、GitHub Actions のテストが動く | `pull_request` では、シークレットは渡されない。パイプラインは main への push でしか動かない |
+| `pull_request_target` | フォークのプルリクエストでも、シークレットが使える状態で動くイベント | 使わない |
+| 他人のプルリクエストのマージ | マージした時点で main に入り、パイプラインでデプロイされる | 中身を読んでからマージする |
+| 他人のアクション | `uses:` で使うアクションは他人のコード | 信頼できる発行元のものだけ使い、バージョンを固定する（[付録 D](phase6-appendix.md#d-アクションのバージョンを固定する)） |
+| `GITHUB_TOKEN` の権限 | 既定のままだと、リポジトリに書き込めることがある | `permissions:` で必要な分（`contents: read`）だけにする |
+| 接続のアプリの範囲 | すべてのリポジトリを許可すると、関係ないリポジトリまで AWS から読める | 使うリポジトリだけを許可する |
 
 ---
 
-## 11. 費用
+## 12. 費用
 
 | もの | 料金 |
 |---|---|
 | GitHub Actions | 公開リポジトリで GitHub のランナー（標準のもの）を使う分は無料。非公開リポジトリは、無料の分（毎月の分数）を超えると有料 |
-| IAM の ID プロバイダー・ロール、STS | 無料 |
+| CodePipeline（V2） | アクションが動いた時間（分）ごと。動いていない間は0。毎月の無料の分がある |
+| CodeBuild | ビルドの時間（分）ごと。マシンの大きさと CPU の種類で単価が変わる（ARM の小さいものは安い） |
+| 接続、パラメータストア（標準）、IAM、STS | 無料 |
+| S3（アーティファクト）、CloudWatch Logs（ビルドのログ） | 置いた量の分だけ。古いものを自動で消す設定にしておく |
 | デプロイ | CloudFormation は無料。入れ替えの間だけ api が1台多く動く（数分ぶん） |
 | AWS のリソース | Phase 5 と同じ（[Phase 5 §12](phase5-study.md#12-費用)） |
 
+- `cdk deploy` は、ローリング更新が終わるまで待つので、CodeBuild の時間はデプロイ1回で十数分になる。時間で課金されるので、入れ替えが速いほど安い
 - 学習していないとき（アプリのスタックがないとき）に main へ push しても、デプロイは飛ばされる。CI/CD が勝手に課金されるものを作らないようにするのも、設計の一部
-- 「毎回の終わり」と「始めるとき」が GitHub の画面だけでできるので、手元に Node.js や AWS の認証情報がない PC でも続けられる（RDS の開始・停止はコンソール）
+- 「毎回の終わり」と「始めるとき」がコンソールのボタンだけでできるので、手元に Node.js や AWS の認証情報がない PC でも続けられる
 
 ---
 
-## 12. ほかの Phase とのつながり
+## 13. ほかの Phase とのつながり
 
 ### Phase 5 から何が置き換わったか
 
 | Phase 5 | Phase 6 |
 |---|---|
-| 手元の PC から `cdk deploy` | GitHub Actions が `cdk deploy`（手元からもできる） |
-| 自分の強い権限（`aws login`）でデプロイ | OIDC で、デプロイに必要な分だけのロールでデプロイ |
-| テストは、思い出したら手元で実行 | プルリクエストと main への push で、必ず実行 |
+| 手元の PC から `cdk deploy` | CodePipeline と CodeBuild が `cdk deploy`（手元からもできる） |
+| 自分の強い権限（`aws login`）でデプロイ | デプロイに必要な分だけのロールでデプロイ |
+| テストは、思い出したら手元で実行 | プルリクエストで GitHub Actions、デプロイの前にパイプラインで、必ず実行 |
 | インスタンスは起動したときの main を取ってくる | テストしたコミットの SHA を取ってくる |
 | アプリを変えても、動いているインスタンスは古いまま | ローリング更新で1台ずつ入れ替える。失敗したらロールバック |
 
@@ -420,13 +480,13 @@ GitHub Actions に `StatuspageGithub` をデプロイさせると、ワークフ
 
 | 弱点 | 解決 | Phase |
 |---|---|---|
-| インスタンスを起動するたびに、パッケージと依存を入れている。入れ替えに時間がかかり、外のサービス（GitHub、PyPI）が落ちていると起動できない | ビルド済みのコンテナイメージ（ECR）から起動する | 7 |
+| インスタンスを起動するたびに、パッケージと依存を入れている。入れ替えに時間がかかり、外のサービス（GitHub、PyPI）が落ちていると起動できない | ビルド済みのコンテナイメージ（ECR）から起動する。イメージを作るのは CodeBuild の役目になる | 7 |
 | デプロイのたびに、仮想マシンを丸ごと作り直している | コンテナだけを入れ替える（ECS のローリング更新） | 7 |
 | 「成功」の判断は、起動直後の `/healthz` だけ | デプロイ後のエラー率などをアラームで見て、ロールバックする | 9 |
 
 ---
 
-## 13. 理解度チェック
+## 14. 理解度チェック
 
 答えは自分で考えてから開く。
 
@@ -449,33 +509,33 @@ CI は変更のたびに自動でテストすること。継続的デリバリ�
 </details>
 
 <details>
-<summary>Q4. GitHub Actions にアクセスキーを渡す方法と比べて、OIDC は何がよい？</summary>
+<summary>Q4. CodePipeline・CodeBuild・接続（CodeConnections）は、それぞれ何をする？</summary>
 
-アクセスキーのような長く使える秘密をどこにも保存しないので、漏れて困るものがない。ジョブごとに一時的な認証情報をもらい、ジョブが終われば使えなくなる。入れ替えの手間もない。
+CodePipeline は「ソース → テスト → デプロイ」の流れを管理する。CodeBuild は buildspec に書いた手順を、使い捨てのマシンで動かす。接続は、AWS が GitHub のリポジトリを読み、push を受け取れるようにする。
 </details>
 
 <details>
-<summary>Q5. 信頼ポリシーの sub の条件を書き忘れると、何が起きる？</summary>
+<summary>Q5. GitHub Actions でテストしているのに、パイプラインにもテストの段を置くのはなぜ？</summary>
 
-GitHub の、ほかの人のリポジトリのジョブでも、このロールを引き受けられてしまう。`aud` は GitHub Actions 全体で同じなので、`aud` だけでは絞れない。
+CodePipeline からは GitHub Actions の結果が見えないので、テストが落ちた変更がマージされても止められない。デプロイするコミットを、デプロイの直前にパイプラインの中でもう一度確かめる。
 </details>
 
 <details>
-<summary>Q6. GitHub Actions 用のロールに EC2 や ALB を作る権限を付けていないのに、cdk deploy ができるのはなぜ？ それでも「強い権限」と言えるのはなぜ？</summary>
+<summary>Q6. デプロイのロールに EC2 や ALB を作る権限を付けていないのに、cdk deploy ができるのはなぜ？ それでも「強い権限」と言えるのはなぜ？</summary>
 
-CDK のブートストラップで作ったロール（deploy-role など）を引き受け、実際の作業はそれらと CloudFormation が行うから。CloudFormation が使う cfn-exec-role は既定で AdministratorAccess なので、テンプレートに書けば何でも作れる。だから、デプロイのジョブを動かせる人を絞る必要がある。
+CDK のブートストラップで作ったロール（deploy-role など）を引き受け、実際の作業はそれらと CloudFormation が行うから。CloudFormation が使う cfn-exec-role は既定で AdministratorAccess なので、テンプレートに書けば何でも作れる。だから、main に入るものを変えられる人を絞る必要がある。
 </details>
 
 <details>
-<summary>Q7. 環境（Environment）の「Deployment branches」の設定がないと、何が起きる？</summary>
+<summary>Q7. GitHub Actions から AWS にデプロイするとき、アクセスキーを使う方法と比べて OIDC は何がよい？ このプロジェクトで使わなかったのはなぜ？</summary>
 
-main 以外のブランチのジョブも環境 `aws` を使えるので、環境のシークレットを読め、OIDC で AWS に入れる。信頼ポリシーの `sub`（`environment:aws`）にはブランチ名が入らないので、AWS 側では止められない。
+アクセスキーのような長く使える秘密をどこにも保存せず、ジョブごとに一時的な認証情報をもらえる。新方式のアカウントでは、SCP が ID プロバイダーの作成を禁止しているので使えない。代わりに、デプロイを AWS の中の CodeBuild で動かし、IAM ロールを付けることで、外から入る必要をなくした。
 </details>
 
 <details>
-<summary>Q8. シークレットに入れた値は、ログに出ても必ず隠される？</summary>
+<summary>Q8. パイプラインの変数 CREATE_APP は何のため？ push で動いたときはどうなる？</summary>
 
-値と完全に同じ文字列だけが `***` に置き換わる。一部分だけ（カンマ区切りの1つ目など）や、加工した値は隠されない。必要なら `::add-mask::` で自分でマスクする。実行してから分かる値も、自分で伏せ字にする。
+アプリのスタックがないときに作るかどうかを決めるため。push で動いたときはデフォルト値（`false`）なので、スタックがなければデプロイせずに終わる。学習していない日に、課金されるものが勝手に作られない。作るときは「変更をリリース」で `true` にする。
 </details>
 
 <details>
@@ -497,9 +557,9 @@ main は時刻によって中身が変わるので、インスタンスごとに
 </details>
 
 <details>
-<summary>Q12. 公開リポジトリで、フォークからのプルリクエストがデプロイできないのはなぜ？</summary>
+<summary>Q12. StatuspagePipeline をパイプライン自身ではなく手元からデプロイするのはなぜ？ 接続と IP アドレスをコードに書かないのはなぜ？</summary>
 
-`pull_request` のイベントでは、フォークからのジョブにシークレットと OIDC のトークンが渡されない。さらに、デプロイのジョブはプルリクエストでは動かず、環境 `aws` は main ブランチだけが使える。
+パイプラインが自分自身をデプロイすると、main に入ったコードでパイプラインのロールの権限を広げられてしまうから。接続は GitHub での許可を画面で行う必要があり、IP アドレスは場所で変わるうえに公開リポジトリに載せたくない。どちらもパラメータストアに置き、コードは名前から値を読む。
 </details>
 
 ---
@@ -508,12 +568,14 @@ main は時刻によって中身が変わるので、インスタンスごとに
 
 - [GitHub Docs: Understanding GitHub Actions](https://docs.github.com/en/actions/about-github-actions/understanding-github-actions)
 - [GitHub Docs: Workflow syntax for GitHub Actions](https://docs.github.com/en/actions/writing-workflows/workflow-syntax-for-github-actions)
-- [GitHub Docs: About security hardening with OpenID Connect](https://docs.github.com/en/actions/security-for-github-actions/security-hardening-your-deployments/about-security-hardening-with-openid-connect)
-- [GitHub Docs: Configuring OpenID Connect in Amazon Web Services](https://docs.github.com/en/actions/security-for-github-actions/security-hardening-your-deployments/configuring-openid-connect-in-amazon-web-services)
-- [GitHub Docs: Managing environments for deployment](https://docs.github.com/en/actions/managing-workflow-runs-and-deployments/managing-deployments/managing-environments-for-deployment)
-- [GitHub Docs: Using secrets in GitHub Actions](https://docs.github.com/en/actions/security-for-github-actions/security-guides/using-secrets-in-github-actions)
-- [aws-actions/configure-aws-credentials](https://github.com/aws-actions/configure-aws-credentials)
-- [IAM ユーザーガイド: OpenID Connect（OIDC）フェデレーション](https://docs.aws.amazon.com/ja_jp/IAM/latest/UserGuide/id_roles_providers_create_oidc.html)
+- [CodePipeline ユーザーガイド: パイプラインの構造](https://docs.aws.amazon.com/ja_jp/codepipeline/latest/userguide/concepts.html)
+- [CodePipeline ユーザーガイド: トリガーとフィルター](https://docs.aws.amazon.com/ja_jp/codepipeline/latest/userguide/pipelines-filter.html)
+- [CodePipeline ユーザーガイド: 変数](https://docs.aws.amazon.com/ja_jp/codepipeline/latest/userguide/reference-variables.html)
+- [CodeBuild ユーザーガイド: buildspec のリファレンス](https://docs.aws.amazon.com/ja_jp/codebuild/latest/userguide/build-spec-ref.html)
+- [CodeBuild ユーザーガイド: 使用できるランタイム](https://docs.aws.amazon.com/ja_jp/codebuild/latest/userguide/available-runtimes.html)
+- [Developer Tools コンソール: GitHub への接続](https://docs.aws.amazon.com/ja_jp/dtconsole/latest/userguide/connections-create-github.html)
+- [Systems Manager パラメータストア](https://docs.aws.amazon.com/ja_jp/systems-manager/latest/userguide/systems-manager-parameter-store.html)
+- [新方式のアカウントの管理ポリシー（SCP）](https://docs.aws.amazon.com/accounts/latest/reference/scps-and-rcps-for-projects.html)
 - [CloudFormation: UpdatePolicy 属性](https://docs.aws.amazon.com/AWSCloudFormation/latest/TemplateReference/aws-attribute-updatepolicy.html)
 - [CloudFormation: cfn-signal](https://docs.aws.amazon.com/AWSCloudFormation/latest/TemplateReference/cfn-signal.html)
 - [AWS CDK: Bootstrapping](https://docs.aws.amazon.com/cdk/v2/guide/bootstrapping.html)

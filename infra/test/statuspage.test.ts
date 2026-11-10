@@ -5,7 +5,7 @@ import { Match, Template } from 'aws-cdk-lib/assertions';
 import { AppStack } from '../lib/app-stack';
 import { DatabaseStack } from '../lib/database-stack';
 import { NetworkStack } from '../lib/network-stack';
-import { GithubStack } from '../lib/github-stack';
+import { PipelineStack } from '../lib/pipeline-stack';
 
 const config = JSON.parse(readFileSync(path.join(__dirname, '../cdk.json'), 'utf8'));
 const allowedCidrs = ['203.0.113.10/32', '198.51.100.20/32'];
@@ -29,8 +29,8 @@ function createStacks(cidrs: string[] = []) {
     allowedCidrs: cidrs,
     appVersion,
   });
-  const github = new GithubStack(app, 'StatuspageGithub', { env, githubRepo: config.context.githubRepo });
-  return { app, network, database, application, github };
+  const pipeline = new PipelineStack(app, 'StatuspagePipeline', { env, githubRepo: config.context.githubRepo });
+  return { app, network, database, application, pipeline };
 }
 
 function singleResource(template: Template, type: string, properties: Record<string, unknown>) {
@@ -199,18 +199,18 @@ describe('Phase 5・6 のスタック', () => {
     expect(ingressRules(application).filter(rule => rule.FromPort === 5432)).toEqual(rules);
   });
 
-  test('依存関係は App → Database・Network、Database → Network のみで Github は独立する', () => {
+  test('依存関係は App → Database・Network、Database → Network のみで Pipeline は独立する', () => {
     expect(stacks.network.dependencies).toEqual([]);
     expect(stacks.database.dependencies).toEqual([stacks.network]);
     expect(stacks.application.dependencies).toEqual(expect.arrayContaining([stacks.network, stacks.database]));
     expect(stacks.application.dependencies).toHaveLength(2);
-    expect(stacks.github.dependencies).toEqual([]);
-    const githubArtifact = assembly.getStackArtifact(stacks.github.artifactId);
-    expect(githubArtifact.dependencies.filter(dependency => dependency.manifest.type === 'aws:cloudformation:stack')).toEqual([]);
+    expect(stacks.pipeline.dependencies).toEqual([]);
+    const pipelineArtifact = assembly.getStackArtifact(stacks.pipeline.artifactId);
+    expect(pipelineArtifact.dependencies.filter(dependency => dependency.manifest.type === 'aws:cloudformation:stack')).toEqual([]);
     for (const stack of assembly.stacks) {
       expect(stack.environment.region).toBe('ap-southeast-2');
-      if (stack.id !== stacks.github.artifactId) {
-        expect(stack.dependencies.map(dependency => dependency.id)).not.toContain(stacks.github.artifactId);
+      if (stack.id !== stacks.pipeline.artifactId) {
+        expect(stack.dependencies.map(dependency => dependency.id)).not.toContain(stacks.pipeline.artifactId);
       }
     }
   });

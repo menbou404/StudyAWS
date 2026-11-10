@@ -1,0 +1,51 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+    paths: ['app/**', 'infra/**', 'deploy/**', '.github/workflows/**']
+  pull_request:
+    paths: ['app/**', 'infra/**', 'deploy/**', '.github/workflows/**']
+
+# テストだけのジョブにはリポジトリの読み取り以外を渡さない。
+permissions:
+  contents: read
+
+jobs:
+  test-app:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: app
+    steps:
+      # ランナーは毎回まっさらなので、テストするコミットを配置する。
+      - uses: actions/checkout@v7.0.1
+      # EC2・Docker と同じ uv を使い、依存の解決方法をそろえる。
+      - uses: astral-sh/setup-uv@v10.3.3
+        with:
+          version: '0.13.5'
+      # ロックファイルとずれた依存を勝手に入れない。
+      - run: uv sync --locked
+      # AWS や本物の監視先に接続せず、アプリの動作を確かめる。
+      - run: uv run pytest
+
+  test-infra:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: infra
+    steps:
+      # app のテストとは別のランナーなので、ここでもコードを配置する。
+      - uses: actions/checkout@v7.0.1
+      # CDK の実行環境を固定し、キャッシュも infra のロックファイルに合わせる。
+      - uses: actions/setup-node@v7.1.0
+        with:
+          node-version: '24'
+          cache: npm
+          cache-dependency-path: infra/package-lock.json
+      # 手元と同じバージョンの依存だけを入れる。
+      - run: npm ci
+      # SG や IAM の制約を、AWS に変更を加える前に確かめる。
+      - run: npm test
+      # 認証情報や環境固有の context がなくてもテンプレートを生成できるようにする。
+      - run: npx cdk synth --quiet

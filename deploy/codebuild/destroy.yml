@@ -1,0 +1,20 @@
+version: 0.2
+
+phases:
+  install:
+    runtime-versions:
+      nodejs: 24
+    commands:
+      # デプロイ時と同じロックファイルで削除の道具をそろえる。
+      - cd "$CODEBUILD_SRC_DIR/infra"
+      - npm ci
+  build:
+    commands:
+      - cd "$CODEBUILD_SRC_DIR/infra"
+      # DB・ネットワーク・パイプラインは残し、毎日の片付けでは App だけを消す。
+      - |
+        if [ "$CONFIRM_DESTROY" = 'true' ]; then
+          npx cdk destroy StatuspageApp --force
+        else
+          printf 'CONFIRM_DESTROY が true ではないため、削除をスキップします（作成時の自動実行や押し間違いで消さないため）\n'
+        fi

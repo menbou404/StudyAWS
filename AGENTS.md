@@ -20,7 +20,8 @@
 | `compose.yaml` | db（PostgreSQL）/ api / worker |
 | `deploy/ec2/` | EC2 用のユーザーデータ、systemd のユニット、nginx の設定 |
 | `infra/` | AWS CDK（TypeScript）のコード（Phase 5 以降） |
-| `.github/workflows/` | GitHub Actions のワークフロー（Phase 6 以降） |
+| `.github/workflows/` | GitHub Actions のワークフロー（Phase 6 以降。テストだけ） |
+| `deploy/codebuild/` | CodeBuild の手順（buildspec）（Phase 6 以降） |
 
 ## コマンド
 
@@ -68,16 +69,15 @@ docker compose up --build   # リポジトリ直下で、3つのコンテナを�
 
 ## CI/CD（Phase 6 以降）
 
-- GitHub Actions のワークフローは `.github/workflows/` に置く。`ci-cd.yml`（テストとデプロイ）、`destroy.yml`（アプリのスタックを消す。手で実行）
-- テストのジョブは AWS に触らない（認証情報なしで `uv run pytest`、`npm test`、`cdk synth` が通るようにする）。依存はロックファイルどおりに入れる（`uv sync --locked`、`npm ci`）。uv のバージョンは `app/Dockerfile` とそろえる
-- AWS には OIDC で入る（`aws-actions/configure-aws-credentials` の `role-to-assume`）。アクセスキーを使わない。デプロイのジョブは環境 `aws` を使い、`permissions` は `id-token: write` と `contents: read` だけ。ワークフロー全体の既定は `contents: read`
-- GitHub Actions 用のロールの権限は、CDK のブートストラップのロール（`cdk-hnb659fds-*`）を引き受けることと、`StatuspageApp` の `cloudformation:DescribeStacks` だけ。リソースを作る権限を直接付けない
-- 公開リポジトリなのでログは公開される。ロールの ARN と IP アドレスは環境のシークレット（`AWS_ROLE_ARN`、`ALLOWED_CIDRS`）から読み、アカウントID はマスクする（`mask-aws-account-id: true`）。CIDR は1つずつ `::add-mask::` する。ALB の DNS 名は出力を `sed` で伏せ字にする。シークレットを `echo` しない
-- デプロイは `vars.DEPLOY_ENABLED == 'true'` のときだけ。push で動いたときは、`StatuspageApp` がなければデプロイせずに終える（課金されるものを勝手に作らない）。`workflow_dispatch` のときは作る
-- `pull_request_target` を使わない。アクションは公式（`actions/`、`aws-actions/`、`astral-sh/`）のものを、バージョンを固定して使う
+- CI は GitHub Actions（`.github/workflows/ci.yml`）：プルリクエストと main への push でテストだけを動かす。AWS には触らない（認証情報なしで `uv run pytest`、`npm test`、`cdk synth` が通るようにする）。ワークフローの `permissions` は `contents: read` だけ。`pull_request_target` を使わない。アクションは公式（`actions/`、`astral-sh/`）のものを、バージョンを固定して使う
+- CD は CodePipeline（V2）+ CodeBuild：パイプライン `statuspage`（Source → Test → Deploy、main への push で動く。トリガーはブランチ `main` とファイルパス `app/**`・`infra/**`・`deploy/**` で絞る。実行モード QUEUED）と、`statuspage-destroy`（トリガーなし。パイプラインは作成直後に1回自動で実行されるので、変数 `CONFIRM_DESTROY`（既定 `false`）が `true` のときだけ `StatuspageApp` を消す）。スタック `StatuspagePipeline`（`infra/lib/pipeline-stack.ts`）に置き、ほかのスタックと参照しない。手元からだけデプロイする（パイプラインに自分自身を更新させない）
+- CodeBuild の手順は `deploy/codebuild/`（`test.yml`・`deploy.yml`・`destroy.yml`）。イメージは `aws/codebuild/amazonlinux-aarch64-standard:4.0`（ARM、小さいサイズ）。Node.js 24・Python 3.13 を `runtime-versions` で指定し、uv は `app/Dockerfile` と同じバージョンを入れる。依存はロックファイルどおり（`uv sync --locked`、`npm ci`）
+- デプロイは `-c appVersion=<コミット SHA>`（パイプラインの `#{SourceVariables.CommitId}`）と `-c allowedCidrs=<パラメータストア /statuspage/allowed-cidrs>` を渡す。`StatuspageApp` がなく、パイプラインの変数 `CREATE_APP`（既定 `false`）が `true` でなければ、デプロイせずに正常終了する（課金されるものを勝手に作らない）
+- CodeBuild のロールの権限は最小にする。テスト：AWS のリソースに触る権限なし。デプロイ：CDK のブートストラップのロール（`cdk-hnb659fds-*`）を引き受ける・`StatuspageApp` の `cloudformation:DescribeStacks`・`/statuspage/allowed-cidrs` の `ssm:GetParameters`。削除：CDK のロールを引き受けるだけ。リソースを作る権限を直接付けない
+- 接続（CodeConnections）は手で作ったものを使う。ARN はパラメータストア `/statuspage/github-connection-arn` から読む（コードにアカウントID を書かない）。リポジトリ名は `cdk.json` の context `githubRepo`
+- パイプラインの名前（`statuspage`、`statuspage-destroy`）は、人がコンソールで探すので固定する
 - アプリのバージョンはコミット SHA で固定する。CDK は `-c appVersion=<40文字の16進数 または main>` を受け取り、それ以外は拒否する（ユーザーデータに埋め込むため）。未指定は `main`
 - ユーザーデータは起動の成功・失敗を cfn-signal で CloudFormation に知らせ、Auto Scaling グループはローリング更新（失敗したらロールバック）にする。手で起動テンプレートに貼ったとき（Phase 4 の手順）も動くよう、知らせ先が空なら知らせない
-- OIDC の ID プロバイダーと GitHub Actions 用のロールは、スタック `StatuspageGithub` に置く（ほかのスタックと参照しない。手元からだけデプロイする）。ロール名は `statuspage-github-deploy` に固定する（GitHub のシークレットが ARN で探すため）
 
 ## 禁止事項
 

@@ -1,0 +1,45 @@
+version: 0.2
+
+env:
+  parameter-store:
+    # 場所で変わる IP アドレスはリポジトリに置かない。
+    ALLOWED_CIDRS: /statuspage/allowed-cidrs
+
+phases:
+  install:
+    runtime-versions:
+      nodejs: 24
+    commands:
+      # テストと同じ CDK の依存でデプロイする。
+      - cd "$CODEBUILD_SRC_DIR/infra"
+      - npm ci
+  build:
+    commands:
+      - cd "$CODEBUILD_SRC_DIR/infra"
+      # スキップと実行を1項目にまとめ、後続の deploy が動くのを防ぐ。
+      - |
+        if [ -z "$APP_VERSION" ]; then
+          printf 'APP_VERSION が空のため、デプロイできません\n' >&2
+          exit 1
+        fi
+        error_file=$(mktemp)
+        trap 'rm -f "$error_file"' EXIT
+        should_deploy=true
+        # 不在だけを正常に扱い、権限不足や通信の失敗は見逃さない。
+        if aws cloudformation describe-stacks --stack-name StatuspageApp \
+          --query 'Stacks[0].StackStatus' --output text > /dev/null 2> "$error_file"; then
+          :
+        elif grep -Fq 'Stack with id StatuspageApp does not exist' "$error_file"; then
+          if [ "$CREATE_APP" != 'true' ]; then
+            printf 'StatuspageApp がなく CREATE_APP が true ではないため、デプロイをスキップします\n'
+            should_deploy=false
+          fi
+        else
+          printf 'StatuspageApp の確認に失敗しました\n' >&2
+          exit 1
+        fi
+        # テストした SHA を渡し、ローリング更新の完了まで待つ。
+        if [ "$should_deploy" = 'true' ]; then
+          npx cdk deploy StatuspageApp --require-approval never \
+            -c allowedCidrs="$ALLOWED_CIDRS" -c appVersion="$APP_VERSION"
+        fi

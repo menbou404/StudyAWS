@@ -5,7 +5,7 @@ import { DatabaseStack } from '../lib/database-stack';
 import { NetworkStack } from '../lib/network-stack';
 import { parseAllowedCidrs } from '../lib/allowed-cidrs';
 import { parseAppVersion } from '../lib/app-version';
-import { GithubStack } from '../lib/github-stack';
+import { PipelineStack } from '../lib/pipeline-stack';
 
 const app = new App();
 const env = {
@@ -33,5 +33,5 @@ new AppStack(app, 'StatuspageApp', {
   appVersion,
 });
 
-// Phase 6：認証の基盤は手元から管理し、ほかのスタックと参照させない。
-new GithubStack(app, 'StatuspageGithub', { env, githubRepo });
+// Phase 6：パイプラインは手元からだけデプロイし、ほかのスタックと参照させない。
+new PipelineStack(app, 'StatuspagePipeline', { env, githubRepo });
