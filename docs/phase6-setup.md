@@ -142,6 +142,8 @@
 自分の IP アドレスは、macOS なら `curl -s https://checkip.amazonaws.com`、Windows（PowerShell）なら `(Invoke-RestMethod https://checkip.amazonaws.com).Trim()` で調べる。
 
 - IP アドレスは、場所（家・大学）や PC によって変わる。変わったら `/statuspage/allowed-cidrs` を更新する
+- 共用のネットワーク（大学・会社など）では、場所を変えなくても、外に出るときの IP アドレスが時間で変わることがある（いくつかのグローバル IP を持ち回りで使う NAT）。ALB につながらず、エラーも返らずにタイムアウトするときは、まず今の IP アドレスがパラメータの値と同じかを確かめる
+- パラメータは、デプロイのときに読まれて ALB のセキュリティグループに入る。更新したら、パイプラインを「変更をリリース」でもう一度動かす
 
 - [x] 完了
 
@@ -265,7 +267,7 @@ git rev-parse HEAD
 - `X-Served-By` に、どのインスタンスが答えたかが出る（Phase 4 と同じ）
 - CodeBuild のマシンからは、ALB に入れない（セキュリティグループが自分の IP だけを許可している）。だから、動作の確認はインスタンスの起動スクリプトの中（cfn-signal）と、手元からの `curl` で行う
 
-- [ ] 完了
+- [x] 完了
 
 ## 7. パイプラインを CDK でコード化する
 
