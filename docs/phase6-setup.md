@@ -194,7 +194,9 @@
 
 ### 5-3. ビルドのロールに権限を足す
 
-「IAM」→「ロール」→ 5-2 で作られたロール →「許可を追加」→「インラインポリシーを作成」→ JSON で次を貼り、名前 `statuspage-deploy-policy` で作る。`<アカウントID>` はコンソール右上からコピーする（Phase 3 で、手で打って1文字間違えると AccessDenied になった）。
+「IAM」→「ロール」→ 5-2 で作られたロール →「許可を追加」→「インラインポリシーを作成」→ JSON で次を貼り、名前 `statuspage-deploy-policy` で作る。`<アカウントID>` は、CLI の `aws sts get-caller-identity --profile study --query Account --output text` で調べてコピーする（Phase 3 で、手で打って1文字間違えると AccessDenied になった）。
+
+- 新方式のアカウントでは、コンソール右上に `AWSManagedAccountManagementAccessRole` と並んで出る「アカウント」の番号は、**自分のアカウントではなく、アカウントを管理している AWS 側の組織のもの**。これを書くと、よそのアカウントのリソースを許可したことになり、自分のリソースには何の許可もないまま AccessDenied になる
 
 ```json
 {
@@ -227,7 +229,7 @@
 - 3つ目：ALB に入れる IP アドレスを読む権限だけ
 - ログの書き込みや、パイプラインとのファイルの受け渡しの権限は、ロールを作ったときに CodeBuild が付けてくれている
 
-- [ ] 完了
+- [x] 完了
 
 ## 6. 初めてのデプロイ
 
