@@ -123,7 +123,7 @@
 - GitHub 側には「AWS Connector for GitHub」というアプリが入る。GitHub の「Settings」→「Applications」で、許可したリポジトリを後から確認・変更できる
 - 接続は、CloudFormation で作っても「GitHub での許可」だけは画面で行う必要がある。だから、コード化せずに手で作ったものを使い続ける
 
-- [ ] 完了
+- [x] 完了
 
 ## 4. パラメータストアに値を置く
 
@@ -143,7 +143,7 @@
 
 - IP アドレスは、場所（家・大学）や PC によって変わる。変わったら `/statuspage/allowed-cidrs` を更新する
 
-- [ ] 完了
+- [x] 完了
 
 ## 5. パイプラインを手で作る
 
