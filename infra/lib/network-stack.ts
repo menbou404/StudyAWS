@@ -1,9 +1,18 @@
 import { Stack, StackProps, aws_ec2 as ec2 } from 'aws-cdk-lib';
 import { Construct } from 'constructs';
 
+const AVAILABILITY_ZONES = ['ap-southeast-2a', 'ap-southeast-2b'];
+
 export class NetworkStack extends Stack {
   public readonly vpc: ec2.Vpc;
   public readonly dbSecurityGroup: ec2.SecurityGroup;
+
+  // CodeBuild のように認証情報だけがある場所では、Vpc の AZ 検証が AWS への問い合わせになる。
+  // cdk.context.json はアカウントIDを含むためコミットせず、キャッシュにも依存させない。
+  // Phase 5 と同じく使う AZ はコードで決めているので、Stack 側も固定して問い合わせを避ける。
+  override get availabilityZones(): string[] {
+    return AVAILABILITY_ZONES;
+  }
 
   constructor(scope: Construct, id: string, props?: StackProps) {
     super(scope, id, props);
@@ -12,7 +21,7 @@ export class NetworkStack extends Stack {
     // DB は外部通信不要のサブネットに置く。AZ を固定して認証なしで synth できるようにする。
     this.vpc = new ec2.Vpc(this, 'Vpc', {
       ipAddresses: ec2.IpAddresses.cidr('10.1.0.0/16'),
-      availabilityZones: ['ap-southeast-2a', 'ap-southeast-2b'],
+      availabilityZones: AVAILABILITY_ZONES,
       natGateways: 0,
       subnetConfiguration: [
         { name: 'public', subnetType: ec2.SubnetType.PUBLIC, cidrMask: 24 },

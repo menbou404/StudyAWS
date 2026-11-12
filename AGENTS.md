@@ -65,6 +65,7 @@ docker compose up --build   # リポジトリ直下で、3つのコンテナを�
 - 各リソースの近くに、Phase 2〜4 のどの手作業に当たるかを日本語のコメントで書く（学習用）
 - `infra/test/` に `aws-cdk-lib/assertions` のテストを書き、`npm test` で通ることを確認する（DB に受信できるのは web と worker の SG だけ、など守りたいルールを確かめる）
 - `infra/tsconfig.json` は `noEmit`。`tsc` に `.js` を出力させない（`bin/`・`lib/`・`test/` に古い `.js` が残ると、jest は `.ts` より `.js` を優先して読み、直したはずのコードがテストされない）。依存は `infra/package.json` で exact 固定、テストは公式雛形どおり `@swc/jest`、実行は `tsx`
+- `cdk synth` で AWS に問い合わせない（コンテキストの lookup を使わない。`fromLookup` を使わず、AZ はスタックの `availabilityZones` を上書きして固定する）。CodeBuild のテストの段は認証情報があるのに AWS の権限がなく、`cdk.context.json` もないので、問い合わせると失敗する。アカウントを決めて synth しても `manifest.missing` が空になることをテストで確かめる
 - CDK の L2 の既定値や挙動はドキュメントと違うことがある（例：`DatabaseInstanceFromSnapshot` の容量の既定は 100GiB、`MachineImage.latestAmazonLinux2023` は `kernel` を上書きする）。守りたい値はテストで確かめる
 
 ## CI/CD（Phase 6 以降）

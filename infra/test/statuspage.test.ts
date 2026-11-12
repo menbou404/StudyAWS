@@ -1,6 +1,6 @@
 import { readFileSync } from 'node:fs';
 import * as path from 'node:path';
-import { App } from 'aws-cdk-lib';
+import { App, Environment } from 'aws-cdk-lib';
 import { Match, Template } from 'aws-cdk-lib/assertions';
 import { AppStack } from '../lib/app-stack';
 import { DatabaseStack } from '../lib/database-stack';
@@ -11,10 +11,9 @@ const config = JSON.parse(readFileSync(path.join(__dirname, '../cdk.json'), 'utf
 const allowedCidrs = ['203.0.113.10/32', '198.51.100.20/32'];
 const appVersion = '0123456789abcdef0123456789abcdef01234567';
 
-function createStacks(cidrs: string[] = []) {
+function createStacks(cidrs: string[] = [], env: Environment = { region: 'ap-southeast-2' }) {
   // 実行時と同じ feature flags を使い、アカウント情報や AWS lookup に依存させない。
   const app = new App({ context: config.context });
-  const env = { region: 'ap-southeast-2' };
   const network = new NetworkStack(app, 'StatuspageNetwork', { env });
   const database = new DatabaseStack(app, 'StatuspageDatabase', {
     env,
@@ -29,7 +28,7 @@ function createStacks(cidrs: string[] = []) {
     allowedCidrs: cidrs,
     appVersion,
   });
-  const pipeline = new PipelineStack(app, 'StatuspagePipeline', { env, githubRepo: config.context.githubRepo });
+  const pipeline = new PipelineStack(app, 'StatuspagePipeline', { env, githubRepo: 'owner/repo' });
   return { app, network, database, application, pipeline };
 }
 
@@ -71,6 +70,31 @@ describe('Phase 5・6 のスタック', () => {
   const network = Template.fromStack(stacks.network);
   const database = Template.fromStack(stacks.database);
   const application = Template.fromStack(stacks.application);
+
+  test('アカウントが決まった4スタックもキャッシュなしでコンテキストを問い合わせない', () => {
+    // App は cdk.context.json を直接読まないが、CLI 経由のキャッシュでも不具合を隠さない。
+    const environment = jest.replaceProperty(process, 'env', {
+      ...process.env,
+      CDK_CONTEXT_JSON: '{}',
+      CONTEXT_OVERFLOW_LOCATION_ENV: '',
+    });
+    try {
+      const concreteStacks = createStacks([], {
+        // 実在のアカウントではなく、CodeBuild と同じ環境確定時の挙動を再現するダミー。
+        account: '123456789012',
+        region: 'ap-southeast-2',
+      });
+      const concreteAssembly = concreteStacks.app.synth();
+      expect(concreteAssembly.stacks).toHaveLength(4);
+      expect(concreteAssembly.manifest.missing ?? []).toEqual([]);
+    } finally {
+      environment.restore();
+    }
+  });
+
+  test('NetworkStack の AZ は Phase 5 で決めた2つに固定する', () => {
+    expect(stacks.network.availabilityZones).toEqual(['ap-southeast-2a', 'ap-southeast-2b']);
+  });
 
   test('VPC は2 AZ の public と isolated に分け、NAT を作らない', () => {
     network.hasResourceProperties('AWS::EC2::VPC', { CidrBlock: '10.1.0.0/16' });
