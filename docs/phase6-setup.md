@@ -296,7 +296,7 @@ npx cdk deploy StatuspagePipeline --profile study
 - `StatuspagePipeline` は、ほかのスタックと参照し合わない。学習を終えるときも消さない（止まっている間は無料）
 - パイプラインの設定を変えたいときは、`pipeline-stack.ts` を直して、手元から `cdk deploy StatuspagePipeline` する
 
-- [ ] 完了
+- [x] 完了
 
 ## 8. 実験A：アプリを変えて、自動でデプロイする
 
