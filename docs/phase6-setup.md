@@ -310,7 +310,7 @@ npx cdk deploy StatuspagePipeline --profile study
 macOS：
 
 ```bash
-while true; do printf '%s ' "$(date +%T)"; curl -s -m 2 -i "http://$ALB/healthz" | grep -iE 'x-served-by|status' | tr -d '\r' | tr '\n' ' '; echo; sleep 2; done
+while true; do r=$(curl -s -m 2 -i "http://$ALB/healthz" | grep -iE 'x-served-by|status' | tr -d '\r' | tr '\n' ' '); echo "$(date +%T) ${r:-ERROR（応答なし）}"; sleep 2; done
 ```
 
 Windows（PowerShell）：
@@ -318,6 +318,8 @@ Windows（PowerShell）：
 ```powershell
 while ($true) { try { $r = Invoke-WebRequest "http://$alb/healthz" -TimeoutSec 2; "$(Get-Date -Format T) $($r.Headers['X-Served-By']) $($r.Content)" } catch { "$(Get-Date -Format T) ERROR" }; Start-Sleep 2 }
 ```
+
+- 始める前に、`version` と `X-Served-By` が表示されていることを確かめる。`ERROR` が続くなら、IP アドレスが変わっている（手順4）
 
 2. ブランチを作り、`app/statuspage/templates/index.html` の `<h1>StatusPage</h1>` の文字を好きなものに変えて、push する
 
@@ -344,7 +346,7 @@ git pull
 - api のインスタンスは、何台ずつ、どの順番で入れ替わったか。worker はどうか
 - マージしてから入れ替えが終わるまで、何分かかったか。どこに一番時間がかかったか
 
-- [ ] 完了
+- [x] 完了
 
 ## 9. 実験B：テストが落ちる変更を出す
 
