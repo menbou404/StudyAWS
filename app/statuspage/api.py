@@ -90,7 +90,7 @@ def to_out(session: Session, target: Target) -> TargetOut:
 @app.get("/healthz")
 def healthz() -> dict[str, str]:
     """アプリが生きているかだけを返す（Phase 4 で ALB のヘルスチェックに使う）。"""
-    return {"status": "ok", "version": config.APP_VERSION}
+    return {"status": "OK", "version": config.APP_VERSION}
 
 
 @app.get("/api/targets")
