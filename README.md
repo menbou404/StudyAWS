@@ -17,7 +17,7 @@
 | 4. 冗長化 | ALB + Auto Scaling（独自ドメイン + HTTPS は付録） | ロードバランサー, マルチAZ, 起動テンプレート, ユーザーデータ | ✅ |
 | 5. コード化 | ここまでの構成を AWS CDK (TypeScript) で再現 | IaC, CloudFormation, CDK | ✅ |
 | 6. CI/CD | GitHub Actions でテスト、CodePipeline で自動デプロイ（ローリング更新・ロールバック） | GitHub Actions, CodePipeline, CodeBuild, CodeConnections, Parameter Store | ✅ |
-| 7. コンテナ化 | ECR + ECS Fargate | コンテナオーケストレーション | |
+| 7. コンテナ化 | ECR + ECS Fargate（パイプラインでイメージを作ってデプロイ） | ECR, ECS, Fargate, CloudWatch Logs, コンテナオーケストレーション | 🚧 |
 | 8. サーバーレス化 | Lambda + EventBridge, S3 + CloudFront | サーバーレス, コスト比較 | |
 | 9. 運用・監視 | ログ・メトリクス・アラーム | CloudWatch | |
 
@@ -40,6 +40,7 @@
 - Phase 4: [手順書](docs/phase4-setup.md) / [知識まとめ](docs/phase4-study.md) / [付録](docs/phase4-appendix.md)
 - Phase 5: [手順書](docs/phase5-setup.md) / [知識まとめ](docs/phase5-study.md) / [付録](docs/phase5-appendix.md)
 - Phase 6: [手順書](docs/phase6-setup.md) / [知識まとめ](docs/phase6-study.md) / [付録](docs/phase6-appendix.md)
+- Phase 7: [手順書](docs/phase7-setup.md) / [知識まとめ](docs/phase7-study.md) / [付録](docs/phase7-appendix.md)
 
 ## 環境
 

@@ -18,10 +18,10 @@
 | `app/tests/` | pytest のテスト。`conftest.py` がテストごとに SQLite を作り直す |
 | `app/Dockerfile` | api と worker が共有するイメージ |
 | `compose.yaml` | db（PostgreSQL）/ api / worker |
-| `deploy/ec2/` | EC2 用のユーザーデータ、systemd のユニット、nginx の設定 |
+| `deploy/ec2/` | EC2 用のユーザーデータ、systemd のユニット、nginx の設定（Phase 2〜6。Phase 7 以降も手順のために残す） |
 | `infra/` | AWS CDK（TypeScript）のコード（Phase 5 以降） |
 | `.github/workflows/` | GitHub Actions のワークフロー（Phase 6 以降。テストだけ） |
-| `deploy/codebuild/` | CodeBuild の手順（buildspec）（Phase 6 以降） |
+| `deploy/codebuild/` | CodeBuild の手順（buildspec）（Phase 6 以降。Phase 7 で `build.yml` を追加） |
 
 ## コマンド
 
@@ -57,10 +57,10 @@ docker compose up --build   # リポジトリ直下で、3つのコンテナを�
 
 - AWS CDK（TypeScript）で書く。場所は `infra/`（`bin/`、`lib/`、`test/`）。`aws-cdk-lib` と CDK CLI（`aws-cdk`）は `infra/package.json` で固定し、`package-lock.json` もコミットする
 - リージョンは `ap-southeast-2`。アカウントID はコードに書かず、`CDK_DEFAULT_ACCOUNT` から取る
-- スタックはライフサイクルで分ける：`StatuspageNetwork`（VPC・DB 用 SG）/ `StatuspageDatabase`（RDS）/ `StatuspageApp`（alb・web・worker の SG と DB への受信ルール、IAM・起動テンプレート・ALB・ASG）。App は毎日 `cdk destroy` されても、DB のデータが残るようにする。参照は App → Network・Database の一方向にする（循環させない）
+- スタックはライフサイクルで分ける：`StatuspageNetwork`（VPC・DB 用 SG）/ `StatuspageDatabase`（RDS）/ `StatuspageRegistry`（ECR、Phase 7 以降）/ `StatuspageApp`（alb・web・worker の SG と DB への受信ルール、ALB。Phase 6 までは IAM・起動テンプレート・ASG、Phase 7 以降は ECS のクラスター・タスク定義・サービス・ロググループ）/ `StatuspagePipeline`。App は毎日 `cdk destroy` されても、DB のデータが残るようにする。参照は App → Network・Database の一方向にする（循環させない）
 - 物理名は、ほかの仕組みが名前で探すものにだけ付ける（RDS の識別子 `statuspage-db`、シークレット `statuspage/db-app`）。それ以外は CDK に任せる
 - 秘密や環境ごとの値をコードに書かない。自分の IP アドレスは `-c allowedCidrs=a/32,b/32` で受け取り、未指定なら ALB に受信ルールを作らない。`cdk.context.json` は `.gitignore` 済み（アカウントID が入るため）
-- ユーザーデータは `deploy/ec2/user-data.sh` を読み込んで使う（worker 用は `ROLE="api"` を置き換える）。スクリプトをコードの中に複製しない
+- （Phase 6 まで）ユーザーデータは `deploy/ec2/user-data.sh` を読み込んで使う（worker 用は `ROLE="api"` を置き換える）。スクリプトをコードの中に複製しない
 - 既存のリソースを使う：シークレット `statuspage/db-app` は参照する（作らない）。RDS はスナップショット `statuspage-db-phase4-final` から作り、削除ポリシーは SNAPSHOT
 - 各リソースの近くに、Phase 2〜4 のどの手作業に当たるかを日本語のコメントで書く（学習用）
 - `infra/test/` に `aws-cdk-lib/assertions` のテストを書き、`npm test` で通ることを確認する（DB に受信できるのは web と worker の SG だけ、など守りたいルールを確かめる）
@@ -77,8 +77,23 @@ docker compose up --build   # リポジトリ直下で、3つのコンテナを�
 - CodeBuild のロールの権限は最小にする。テスト：AWS のリソースに触る権限なし。デプロイ：CDK のブートストラップのロール（`cdk-hnb659fds-*`）を引き受ける・`StatuspageApp` の `cloudformation:DescribeStacks`・`/statuspage/allowed-cidrs` の `ssm:GetParameters`。削除：CDK のロールを引き受けるだけ。リソースを作る権限を直接付けない
 - 接続（CodeConnections）は手で作ったものを使う。ARN はパラメータストア `/statuspage/github-connection-arn` から読む（コードにアカウントID を書かない）。リポジトリ名は `cdk.json` の context `githubRepo`
 - パイプラインの名前（`statuspage`、`statuspage-destroy`）は、人がコンソールで探すので固定する
+- パイプライン `statuspage` は Phase 7 から Source → Test → Build → Deploy。Build（`deploy/codebuild/build.yml`）は、そのコミット SHA のタグのイメージが ECR の `statuspage` にあれば作らず、なければ `docker build` して SHA のタグで push する（「ない」は `ImageNotFoundException` のときだけと判断し、権限不足などは失敗にする）。プロジェクトは特権モード、イメージは test・deploy と同じ ARM。ロールは `ecr:GetAuthorizationToken`（リソース `*`）と、リポジトリ `statuspage` へのイメージの確認・push だけ。リポジトリは名前で参照し、`StatuspageRegistry` と参照し合わない
+- GitHub Actions の `ci.yml` は、`docker build`（push しない）で `app/Dockerfile` からイメージを作れることも確かめる（`ubuntu-24.04-arm` のランナー）
 - アプリのバージョンはコミット SHA で固定する。CDK は `-c appVersion=<40文字の16進数 または main>` を受け取り、それ以外は拒否する（ユーザーデータに埋め込むため）。未指定は `main`
-- ユーザーデータは起動の成功・失敗を cfn-signal で CloudFormation に知らせ、Auto Scaling グループはローリング更新（失敗したらロールバック）にする。手で起動テンプレートに貼ったとき（Phase 4 の手順）も動くよう、知らせ先が空なら知らせない
+- （Phase 6 の EC2）ユーザーデータは起動の成功・失敗を cfn-signal で CloudFormation に知らせ、Auto Scaling グループはローリング更新（失敗したらロールバック）にする。手で起動テンプレートに貼ったとき（Phase 4 の手順）も動くよう、知らせ先が空なら知らせない
+
+## コンテナ（Phase 7 以降）
+
+- イメージは `app/Dockerfile` の1つだけ。api と worker は同じイメージを使い、worker はコマンドを `python -m statuspage.worker` に上書きする（`compose.yaml` と同じ）
+- ベースイメージは ECR Public（`public.ecr.aws/docker/library/python`）から取る（Docker Hub の取得回数の制限を避ける）。`CMD` は exec 形式のまま、uvicorn に `--timeout-keep-alive 65` を付ける（ALB のアイドルタイムアウト60秒より長くし、502 を避ける）
+- アプリは応答に `X-Served-By`（ホスト名）を付ける。EC2 の nginx は `proxy_hide_header` でアプリの値を隠し、自分の `$hostname` だけを返す
+- DB の接続先は、`DATABASE_URL` があればそれを使う。なければ `DB_HOST`・`DB_PORT`（既定 5432）・`DB_NAME`（既定 statuspage）・`DB_USER`（既定 statuspage）・`DB_PASSWORD`・`DB_SSLMODE`（既定 require）から SQLAlchemy の `URL.create` で組み立てる（パスワードを文字列の連結で URL に入れない）。`DB_HOST` もなければ SQLite
+- ECR のリポジトリ `statuspage` は `StatuspageRegistry` に置く（物理名を付ける：パイプラインと App が名前で探す）。タグは不変（IMMUTABLE）、プッシュ時スキャン、ライフサイクルで新しい10個だけ残す。スタックを消したらイメージも消す（`emptyOnDelete`）
+- イメージのタグはコミット SHA（`appVersion`）。`main` は synth とテストのためだけに受け付ける（そのタグのイメージは作らない）
+- Fargate の Linux / ARM64、タスクは 0.25 vCPU・512 MiB。パブリックサブネットに置き、パブリック IP を付ける（NAT ゲートウェイを作らない）。ALB のターゲットは IP、ポート 8000、ヘルスチェックは `/healthz`
+- api：希望数 2、minimumHealthyPercent 100・maximumPercent 200。worker：希望数 1、0・100（二重実行を避ける）。どちらもデプロイのサーキットブレーカー（rollback あり）。api のヘルスチェックの猶予は60秒、登録解除の遅延は30秒
+- パスワードはタスク定義の `secrets`（シークレット `statuspage/db-app` を参照）で渡し、`environment` に値を書かない。読むのはタスク実行ロールだけ。タスクロールには許可を付けない（アプリは AWS の API を呼ばない）
+- ログは `awslogs` で CloudWatch Logs へ。ロググループは App が持ち、保存1週間、スタックを消したら消す。Container Insights と ECS Exec は使わない（費用・権限を増やさない）
 
 ## 禁止事項
 
