@@ -3,14 +3,15 @@
 起動方法: uvicorn statuspage.api:app
 """
 
-from collections.abc import Iterator
+import socket
+from collections.abc import Awaitable, Callable, Iterator
 from contextlib import asynccontextmanager
 from datetime import datetime
 from pathlib import Path
 from typing import Annotated
 
 from fastapi import Depends, FastAPI, HTTPException, Query, Request
-from fastapi.responses import HTMLResponse
+from fastapi.responses import HTMLResponse, Response
 from fastapi.templating import Jinja2Templates
 from pydantic import BaseModel, ConfigDict, Field, HttpUrl
 from sqlalchemy import select
@@ -28,6 +29,17 @@ async def lifespan(app: FastAPI):
 
 app = FastAPI(title="StatusPage", lifespan=lifespan)
 templates = Jinja2Templates(directory=Path(__file__).parent / "templates")
+# Phase 7：nginx のない ECS でも応答元を確認する。ホスト名はタスク内で変わらない。
+HOSTNAME = socket.gethostname()
+
+
+@app.middleware("http")
+async def add_served_by(
+    request: Request, call_next: Callable[[Request], Awaitable[Response]]
+) -> Response:
+    response = await call_next(request)
+    response.headers["X-Served-By"] = HOSTNAME
+    return response
 
 
 def get_session() -> Iterator[Session]:

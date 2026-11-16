@@ -12,6 +12,13 @@ permissions:
   contents: read
 
 jobs:
+  test-image:
+    runs-on: ubuntu-24.04-arm
+    steps:
+      # Phase 7：本番と同じ ARM で Dockerfile とロックファイルからイメージを作れるか確かめる。
+      - uses: actions/checkout@v7.0.1
+      - run: docker build --platform linux/arm64 -t statuspage:ci app
+
   test-app:
     runs-on: ubuntu-latest
     defaults:

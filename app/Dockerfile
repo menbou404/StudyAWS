@@ -1,5 +1,5 @@
-# 1 土台
-FROM python:3.13-slim
+# 1 土台（ECR Public で Docker Hub の取得回数制限を避ける）
+FROM public.ecr.aws/docker/library/python:3.13-slim
 
 # 2 uvの実行ファイルのコピー
 COPY --from=ghcr.io/astral-sh/uv:0.13.5 /uv /usr/local/bin/uv
@@ -26,5 +26,5 @@ USER appuser
 # 9 コンテナポートのメモ
 EXPOSE 8000
 
-# 10 コンテナを起動する際に実行するコマンド
-CMD ["uvicorn", "statuspage.api:app", "--host", "0.0.0.0", "--port", "8000"]
+# 10 コンテナを起動する際に実行するコマンド（ALB の60秒より長く接続を保ち、502 を避ける）
+CMD ["uvicorn", "statuspage.api:app", "--host", "0.0.0.0", "--port", "8000", "--timeout-keep-alive", "65"]

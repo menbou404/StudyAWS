@@ -1,17 +1,18 @@
-import { readFileSync } from 'node:fs';
-import * as path from 'node:path';
 import {
+  ArnFormat,
   CfnOutput,
   Duration,
-  Lazy,
+  RemovalPolicy,
   Stack,
   StackProps,
-  aws_autoscaling as autoscaling,
   aws_ec2 as ec2,
+  aws_ecr as ecr,
+  aws_ecs as ecs,
   aws_elasticloadbalancingv2 as elbv2,
   aws_iam as iam,
+  aws_logs as logs,
   aws_rds as rds,
-  aws_secretsmanager as secretsmanager,
+  custom_resources as cr,
 } from 'aws-cdk-lib';
 import { Construct } from 'constructs';
 import { parseAllowedCidrs } from './allowed-cidrs';
@@ -29,8 +30,9 @@ export class AppStack extends Stack {
   constructor(scope: Construct, id: string, props: AppStackProps) {
     super(scope, id, props);
 
-    // Phase 4 手順2：許可 IP の変更は App に閉じ込める。直接のスタック利用でも /0 を拒否する。
+    // Phase 4 手順2・Phase 7 手順4：入口の制限を App に閉じ込め、直接の利用でも /0 を拒否する。
     const allowedCidrs = parseAllowedCidrs(props.allowedCidrs.join(','));
+    const appVersion = parseAppVersion(props.appVersion);
     const albSg = new ec2.SecurityGroup(this, 'AlbSecurityGroup', {
       vpc: props.vpc,
       description: 'statuspage alb',
@@ -39,22 +41,22 @@ export class AppStack extends Stack {
       albSg.addIngressRule(ec2.Peer.ipv4(cidr), ec2.Port.tcp(80), 'allowed cidr');
     }
 
-    // Phase 4 手順2：api の入口を ALB に絞る。外向き通信は起動時の導入と SSM に必要。
+    // Phase 7 手順4：手動タスクの入口を ALB に絞り、nginx を通さず api の8000番へ送る。
     const webSg = new ec2.SecurityGroup(this, 'WebSecurityGroup', {
       vpc: props.vpc,
       description: 'statuspage web',
       allowAllOutbound: true,
     });
-    webSg.addIngressRule(albSg, ec2.Port.tcp(80), 'from alb');
+    webSg.addIngressRule(albSg, ec2.Port.tcp(8000), 'from alb');
 
-    // Phase 4 手順2：worker は受信不要だが、監視対象や SSM への送信は必要。
+    // Phase 7 手順4：worker は受信不要だが、ECR・ログ・監視対象への送信は必要。
     const workerSg = new ec2.SecurityGroup(this, 'WorkerSecurityGroup', {
       vpc: props.vpc,
       description: 'statuspage worker',
       allowAllOutbound: true,
     });
 
-    // Phase 3 手順2・Phase 4 手順2：L1 のルールを App に所有させる。
+    // Phase 7 手順4-2：L1 のルールを App に所有させ、片付けで DB の受信も閉じる。
     // DB の SG を変更する L2 API では Network → App の参照が生じるため、循環を避ける。
     for (const [name, source] of [['web', webSg], ['worker', workerSg]] as const) {
       new ec2.CfnSecurityGroupIngress(this, `DatabaseFrom${name}`, {
@@ -67,73 +69,106 @@ export class AppStack extends Stack {
       });
     }
 
-    // Phase 2 手順2・Phase 3 手順6・Phase 4 手順3：鍵を配らず SSM で管理し、
-    // 起動スクリプトが読むアプリ用シークレットと DB だけに権限を限定する。
-    const role = new iam.Role(this, 'InstanceRole', {
-      assumedBy: new iam.ServicePrincipal('ec2.amazonaws.com'),
-      managedPolicies: [iam.ManagedPolicy.fromAwsManagedPolicyName('AmazonSSMManagedInstanceCore')],
-    });
-    const appSecret = secretsmanager.Secret.fromSecretNameV2(this, 'AppSecret', 'statuspage/db-app');
-    appSecret.grantRead(role);
-    role.addToPolicy(new iam.PolicyStatement({
-      actions: ['rds:DescribeDBInstances'],
-      resources: [props.database.instanceArn],
-    }));
-    // Phase 6：起動結果の通知だけを自分のスタックに許可し、ほかのスタックへの通知を防ぐ。
-    // ASG の signals も同じスタックの AWS::StackId を自動追加するが、通知先の範囲は広がらない。
-    role.addToPolicy(new iam.PolicyStatement({
-      actions: ['cloudformation:SignalResource'],
-      resources: [this.formatArn({
-        service: 'cloudformation', resource: 'stack', resourceName: `${this.stackName}/*`,
-      })],
-    }));
-
-    // Phase 4 手順4：Phase 2 の構築スクリプトを共有し、複製による修正漏れを避ける。
-    const source = readFileSync(path.join(__dirname, '../../deploy/ec2/user-data.sh'), 'utf8');
-    for (const marker of ['ROLE="api"', 'APP_VERSION="main"', 'CFN_STACK=""', 'CFN_RESOURCE=""']) {
-      if (source.split(marker).length !== 2) {
-        throw new Error(`user-data.sh の ${marker} はちょうど1か所必要です`);
-      }
-    }
-    const appVersion = parseAppVersion(props.appVersion);
-    const scriptFor = (roleName: 'api' | 'worker', asg: autoscaling.AutoScalingGroup): string => source
-      .replace('ROLE="api"', `ROLE="${roleName}"`)
-      .replace('APP_VERSION="main"', `APP_VERSION="${appVersion}"`)
-      .replace('CFN_STACK=""', `CFN_STACK="${this.stackName}"`)
-      // 論理 ID は単なる文字列にし、起動テンプレート → ASG の参照による循環を避ける。
-      .replace('CFN_RESOURCE=""', `CFN_RESOURCE="${this.getLogicalId(asg.node.defaultChild as autoscaling.CfnAutoScalingGroup)}"`);
-
-    // Phase 4 手順4：Arm の AMI とインスタンスを揃え、SSM 公開パラメータ参照で lookup を避ける。
-    // latestAmazonLinux2023 は kernel を上書きするため、直接クラスを使って手動構築時の標準カーネルに揃える。
-    const machineImage = new ec2.AmazonLinux2023ImageSsmParameter({
-      cpuType: ec2.AmazonLinuxCpuType.ARM_64,
-      kernel: ec2.AmazonLinux2023Kernel.DEFAULT,
-      cachedInContext: false,
-    });
-    const apiTemplate = new ec2.LaunchTemplate(this, 'ApiLaunchTemplate', {
-      machineImage,
-      instanceType: new ec2.InstanceType('t4g.micro'),
-      role,
-      securityGroup: webSg,
-      // ASG が起動テンプレートを必要とするため、ASG 作成後の synth 時にスクリプトを解決する。
-      userData: ec2.UserData.custom(Lazy.string({ produce: () => scriptFor('api', apiAsg) })),
-      requireImdsv2: true,
-    });
-    const workerTemplate = new ec2.LaunchTemplate(this, 'WorkerLaunchTemplate', {
-      machineImage,
-      instanceType: new ec2.InstanceType('t4g.micro'),
-      role,
-      securityGroup: workerSg,
-      userData: ec2.UserData.custom(Lazy.string({ produce: () => scriptFor('worker', workerAsg) })),
-      requireImdsv2: true,
+    // Phase 7 手順4-3：EC2 の管理をせず、Fargate にタスクの配置を任せる。
+    const cluster = new ecs.Cluster(this, 'Cluster', {
+      vpc: props.vpc,
+      containerInsightsV2: ecs.ContainerInsights.DISABLED,
     });
 
-    // Phase 4 手順5：DB 障害で api を入れ替え続けないよう、浅い /healthz を確認する。
+    // Phase 7 手順3-5・手順4-8：タスクを止めても調査できるよう、ログは1週間残す。
+    const apiLogs = new logs.LogGroup(this, 'ApiLogs', {
+      retention: logs.RetentionDays.ONE_WEEK,
+      removalPolicy: RemovalPolicy.DESTROY,
+    });
+    const workerLogs = new logs.LogGroup(this, 'WorkerLogs', {
+      retention: logs.RetentionDays.ONE_WEEK,
+      removalPolicy: RemovalPolicy.DESTROY,
+    });
+
+    // Phase 7 手順3-1：名前参照の部分 ARN を ECS に渡さず、デプロイ時に完全 ARN を調べる。
+    // synth の lookup や秘密の値の取得は不要。参照用 Lambda のログも api と同じ寿命で片付ける。
+    const secretArn = this.formatArn({
+      service: 'secretsmanager', resource: 'secret', resourceName: 'statuspage/db-app-??????',
+      arnFormat: ArnFormat.COLON_RESOURCE_NAME,
+    });
+    const secretLookup = new cr.AwsCustomResource(this, 'AppSecretArn', {
+      onUpdate: {
+        service: 'SecretsManager',
+        action: 'describeSecret',
+        parameters: { SecretId: 'statuspage/db-app' },
+        physicalResourceId: cr.PhysicalResourceId.of('statuspage/db-app'),
+        outputPaths: ['ARN'],
+      },
+      policy: cr.AwsCustomResourcePolicy.fromStatements([new iam.PolicyStatement({
+        actions: ['secretsmanager:DescribeSecret'],
+        resources: [secretArn],
+      })]),
+      installLatestAwsSdk: false,
+      logGroup: apiLogs,
+    });
+    // Phase 7 手順3-6：値を読むのは ECS の実行ロールだけ。アプリのタスクロールは無権限にする。
+    const dbPassword: ecs.Secret = {
+      arn: secretLookup.getResponseField('ARN'),
+      grantRead: grantee => iam.Grant.addToPrincipal({
+        grantee,
+        actions: ['secretsmanager:GetSecretValue'],
+        resourceArns: [secretArn],
+      }),
+    };
+
+    // Phase 7 手順2・3：Registry とは名前で参照し、毎日の App 削除と ECR の寿命を分ける。
+    const repository = ecr.Repository.fromRepositoryName(this, 'Repository', 'statuspage');
+    // main は synth・テスト専用であり、実際のビルドはコミット SHA のタグだけを作る。
+    const image = ecs.ContainerImage.fromEcrRepository(repository, appVersion);
+    const createTask = (name: 'api' | 'worker', logGroup: logs.ILogGroup): ecs.FargateTaskDefinition => {
+      // Phase 7 手順3-2：手元と CodeBuild と同じ ARM64 にそろえ、小さいタスクで学習費用を抑える。
+      const task = new ecs.FargateTaskDefinition(this, `${name}Task`, {
+        cpu: 256,
+        memoryLimitMiB: 512,
+        runtimePlatform: {
+          cpuArchitecture: ecs.CpuArchitecture.ARM64,
+          operatingSystemFamily: ecs.OperatingSystemFamily.LINUX,
+        },
+      });
+      // Phase 7 手順3-3〜5：同じイメージを使い、秘密だけを起動時に ECS から渡す。
+      task.addContainer(name, {
+        containerName: name,
+        image,
+        environment: { APP_VERSION: appVersion, DB_HOST: props.database.dbInstanceEndpointAddress },
+        secrets: { DB_PASSWORD: dbPassword },
+        logging: ecs.LogDrivers.awsLogs({ logGroup, streamPrefix: name }),
+        ...(name === 'api'
+          ? { portMappings: [{ containerPort: 8000 }] }
+          : { command: ['python', '-m', 'statuspage.worker'] }),
+      });
+      return task;
+    };
+    const apiTask = createTask('api', apiLogs);
+    const workerTask = createTask('worker', workerLogs);
+
+    // Phase 7 手順5：api は2個を維持してから入れ替え、起動失敗が続いたら前の版へ戻す。
+    // 手順4と同じ public IP で ECR へ出るため、NAT は増やさない。
+    const api = new ecs.FargateService(this, 'ApiService', {
+      cluster,
+      taskDefinition: apiTask,
+      desiredCount: 2,
+      assignPublicIp: true,
+      vpcSubnets: { subnetType: ec2.SubnetType.PUBLIC },
+      securityGroups: [webSg],
+      minHealthyPercent: 100,
+      maxHealthyPercent: 200,
+      circuitBreaker: { enable: true, rollback: true },
+      healthCheckGracePeriod: Duration.seconds(60),
+      enableExecuteCommand: false,
+    });
+
+    // Phase 4 手順5・Phase 7 手順5：DB 障害で交換し続けないよう浅いチェックを使い、IP で登録する。
     const targetGroup = new elbv2.ApplicationTargetGroup(this, 'ApiTargetGroup', {
       vpc: props.vpc,
       protocol: elbv2.ApplicationProtocol.HTTP,
-      port: 80,
-      targetType: elbv2.TargetType.INSTANCE,
+      port: 8000,
+      targetType: elbv2.TargetType.IP,
+      targets: [api.loadBalancerTarget({ containerName: 'api', containerPort: 8000 })],
       healthCheck: {
         path: '/healthz',
         interval: Duration.seconds(10),
@@ -145,65 +180,30 @@ export class AppStack extends Stack {
       deregistrationDelay: Duration.seconds(30),
     });
 
-    // Phase 4 手順6：公開サブネットで受けるが、リスナーの自動的な全世界公開は無効にする。
+    // Phase 4 手順6・Phase 7 手順5：タスクの IP が変わっても、利用者の入口は ALB に保つ。
     const alb = new elbv2.ApplicationLoadBalancer(this, 'Alb', {
       vpc: props.vpc,
       internetFacing: true,
       vpcSubnets: { subnetType: ec2.SubnetType.PUBLIC },
       securityGroup: albSg,
     });
-    alb.addListener('HttpListener', {
-      port: 80,
-      open: false,
-      defaultTargetGroups: [targetGroup],
-    });
+    alb.addListener('HttpListener', { port: 80, open: false, defaultTargetGroups: [targetGroup] });
 
-    // Phase 4 手順7：2 AZ に api を保ち、EC2 と ALB のどちらの異常でも交換する。
-    // 起動スクリプトの導入時間を見込み、ヘルスチェックには5分の猶予を与える。
-    const apiAsg = new autoscaling.AutoScalingGroup(this, 'ApiAutoScalingGroup', {
-      vpc: props.vpc,
+    // Phase 7 手順5：監視の二重実行を避け、古い1個を止めてから新しい1個を起動する。
+    new ecs.FargateService(this, 'WorkerService', {
+      cluster,
+      taskDefinition: workerTask,
+      desiredCount: 1,
+      assignPublicIp: true,
       vpcSubnets: { subnetType: ec2.SubnetType.PUBLIC },
-      launchTemplate: apiTemplate,
-      minCapacity: 2,
-      maxCapacity: 4,
-      desiredCapacity: 2,
-      // Phase 6：初回も2台の起動完了を待ち、10分以内にそろわなければ失敗させる。
-      signals: autoscaling.Signals.waitForMinCapacity({ timeout: Duration.minutes(10) }),
-      // API を2台稼働させたまま1台ずつ交換し、起動通知が失敗ならロールバックさせる。
-      updatePolicy: autoscaling.UpdatePolicy.rollingUpdate({
-        maxBatchSize: 1,
-        minInstancesInService: 2,
-        waitOnResourceSignals: true,
-        pauseTime: Duration.minutes(10),
-      }),
-      healthChecks: autoscaling.HealthChecks.withAdditionalChecks({
-        additionalTypes: [autoscaling.AdditionalHealthCheckType.ELB],
-        gracePeriod: Duration.seconds(300),
-      }),
-    });
-    apiAsg.attachToApplicationTargetGroup(targetGroup);
-
-    // Phase 4 手順8：監視の二重実行を避けて1台を維持する。HTTP を受けないので ALB に登録しない。
-    const workerAsg = new autoscaling.AutoScalingGroup(this, 'WorkerAutoScalingGroup', {
-      vpc: props.vpc,
-      vpcSubnets: { subnetType: ec2.SubnetType.PUBLIC },
-      launchTemplate: workerTemplate,
-      minCapacity: 1,
-      maxCapacity: 1,
-      desiredCapacity: 1,
-      // Phase 6：監視ジョブも起動成功の通知を待ち、導入中の失敗を見逃さない。
-      signals: autoscaling.Signals.waitForMinCapacity({ timeout: Duration.minutes(10) }),
-      // MaxSize 1 より小さい0を指定し、二重実行を避けて古い1台を止めてから交換する。
-      updatePolicy: autoscaling.UpdatePolicy.rollingUpdate({
-        maxBatchSize: 1,
-        minInstancesInService: 0,
-        waitOnResourceSignals: true,
-        pauseTime: Duration.minutes(10),
-      }),
-      healthChecks: autoscaling.HealthChecks.ec2(),
+      securityGroups: [workerSg],
+      minHealthyPercent: 0,
+      maxHealthyPercent: 100,
+      circuitBreaker: { enable: true, rollback: true },
+      enableExecuteCommand: false,
     });
 
-    // Phase 4 手順9：作り直すたびに変わる入口を、固定名を付けずに確認できるようにする。
+    // Phase 4 手順9・Phase 7 手順5：作り直すたびに変わる入口を、物理名を固定せずに確認する。
     new CfnOutput(this, 'AlbDnsName', { value: alb.loadBalancerDnsName });
   }
 }

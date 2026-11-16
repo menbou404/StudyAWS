@@ -43,7 +43,10 @@ export class PipelineStack extends Stack {
       buildImage: codebuild.LinuxArmBuildImage.AMAZON_LINUX_2023_STANDARD_4_0,
       computeType: codebuild.ComputeType.SMALL,
     };
-    const createProject = (projectId: string, file: string, timeout?: Duration): codebuild.PipelineProject => {
+    const createProject = (
+      projectId: string, file: string, timeout?: Duration,
+      overrides: Partial<codebuild.PipelineProjectProps> = {},
+    ): codebuild.PipelineProject => {
       const logGroup = new logs.LogGroup(this, `${projectId}Logs`, {
         retention: logs.RetentionDays.ONE_WEEK,
         removalPolicy: RemovalPolicy.DESTROY,
@@ -55,11 +58,32 @@ export class PipelineStack extends Stack {
         logging: { cloudWatch: { logGroup } },
         // レポート機能は使わないため、その自動付与の権限も不要。
         grantReportGroupPermissions: false,
+        ...overrides,
       });
     };
     const test = createProject('Test', 'test');
+    // Phase 7 手順2：手元の docker build・push を ARM の特権モードで再現する。
+    const build = createProject('Build', 'build', undefined, {
+      environment: { ...environment, privileged: true },
+      environmentVariables: {
+        REPOSITORY_URI: { value: `${this.account}.dkr.ecr.ap-southeast-2.${this.urlSuffix}/statuspage` },
+      },
+    });
     const deploy = createProject('Deploy', 'deploy', Duration.minutes(60));
     const destroy = createProject('Destroy', 'destroy', Duration.minutes(60));
+
+    // Phase 7 手順2：ログインはリポジトリで絞れないが、イメージの確認・push は1つだけにする。
+    build.addToRolePolicy(new iam.PolicyStatement({
+      actions: ['ecr:GetAuthorizationToken'],
+      resources: ['*'],
+    }));
+    build.addToRolePolicy(new iam.PolicyStatement({
+      actions: [
+        'ecr:BatchCheckLayerAvailability', 'ecr:BatchGetImage', 'ecr:DescribeImages',
+        'ecr:InitiateLayerUpload', 'ecr:UploadLayerPart', 'ecr:CompleteLayerUpload', 'ecr:PutImage',
+      ],
+      resources: [this.formatArn({ service: 'ecr', resource: 'repository', resourceName: 'statuspage' })],
+    }));
 
     // Phase 6 手順5-3：AWS のリソースを直接操作せず、Phase 5 の CDK ロールに作業を任せる。
     const bootstrapRoleArn = this.formatArn({
@@ -119,6 +143,11 @@ export class PipelineStack extends Stack {
         { stageName: 'Source', actions: [source] },
         // 手順5の手作業にテストの段を足し、失敗したコミットがデプロイへ進むのを防ぐ。
         { stageName: 'Test', actions: [new actions.CodeBuildAction({ actionName: 'Test', project: test, input: sourceOutput })] },
+        // Phase 7 手順2：同じコミットのイメージを1回だけ作り、次の段はその SHA で参照する。
+        { stageName: 'Build', actions: [new actions.CodeBuildAction({
+          actionName: 'Build', project: build, input: sourceOutput,
+          environmentVariables: { APP_VERSION: { value: source.variables.commitId } },
+        })] },
         { stageName: 'Deploy', actions: [new actions.CodeBuildAction({
           actionName: 'Deploy', project: deploy, input: sourceOutput,
           environmentVariables: {

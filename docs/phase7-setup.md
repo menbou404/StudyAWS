@@ -337,7 +337,7 @@ curl -i http://<タスクのパブリック IP>:8000/healthz
 | ファイル | 読むところ |
 |---|---|
 | `infra/lib/registry-stack.ts` | 手順2のリポジトリの設定（タグの不変、スキャン、古いイメージの削除） |
-| `infra/lib/app-stack.ts` | 手順3のタスク定義（api と worker の2つ）、手順4のネットワークと SG、手順5のサービス。手作業になかった ALB とデプロイの設定 |
+| `infra/lib/app-stack.ts` | 手順3のタスク定義（api と worker の2つ）、手順4のネットワークと SG、手順5のサービス。手作業になかった ALB とデプロイの設定。手順3-1で手で調べたシークレットの ARN を、デプロイのときに調べるカスタムリソース |
 | `infra/lib/pipeline-stack.ts`・`deploy/codebuild/build.yml` | ビルドの段。手順2の `docker login`・`build`・`push` |
 
 2. `infra/` の中で、リポジトリとパイプラインを手元からデプロイする

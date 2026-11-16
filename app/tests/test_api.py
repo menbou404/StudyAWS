@@ -1,7 +1,16 @@
+import socket
+
 from fastapi.testclient import TestClient
-from pytest import MonkeyPatch
+from pytest import MonkeyPatch, mark
 
 from statuspage import config
+
+
+@mark.parametrize(("path", "status_code"), [("/healthz", 200), ("/missing", 404)])
+def test_served_by_header(client: TestClient, path: str, status_code: int) -> None:
+    response = client.get(path)
+    assert response.status_code == status_code
+    assert response.headers["X-Served-By"] == socket.gethostname()
 
 
 def test_healthz(client: TestClient) -> None:

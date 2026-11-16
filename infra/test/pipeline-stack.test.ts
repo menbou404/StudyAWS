@@ -41,14 +41,14 @@ describe('CodePipeline と CodeBuild のデプロイ基盤', () => {
     return policies.flatMap(policy => policy.Properties.PolicyDocument.Statement);
   }
 
-  test('通常のパイプラインは V2・QUEUED で Source → Test → Deploy の順に進む', () => {
+  test('通常のパイプラインは V2・QUEUED で Source → Test → Build → Deploy の順に進む', () => {
     template.resourceCountIs('AWS::CodePipeline::Pipeline', 2);
     const props = pipeline('statuspage');
     expect(props).toMatchObject({
       PipelineType: 'V2', ExecutionMode: 'QUEUED', RestartExecutionOnUpdate: false,
       Variables: [{ Name: 'CREATE_APP', DefaultValue: 'false', Description: expect.any(String) }],
     });
-    expect(props.Stages.map((stage: { Name: string }) => stage.Name)).toEqual(['Source', 'Test', 'Deploy']);
+    expect(props.Stages.map((stage: { Name: string }) => stage.Name)).toEqual(['Source', 'Test', 'Build', 'Deploy']);
     const source = props.Stages[0].Actions[0];
     expect(source).toMatchObject({
       Namespace: 'SourceVariables',
@@ -62,13 +62,13 @@ describe('CodePipeline と CodeBuild のデプロイ基盤', () => {
         Push: [{ Branches: { Includes: ['main'] }, FilePaths: { Includes: ['app/**', 'infra/**', 'deploy/**'] } }],
       },
     }]);
-    const deploy = props.Stages[2].Actions[0];
+    const deploy = props.Stages[3].Actions[0];
     expect(JSON.parse(deploy.Configuration.EnvironmentVariables)).toEqual([
       { name: 'APP_VERSION', value: '#{SourceVariables.CommitId}', type: 'PLAINTEXT' },
       { name: 'CREATE_APP', value: '#{variables.CREATE_APP}', type: 'PLAINTEXT' },
     ]);
     // どの段にも同じソースを渡し、テストしたコードとデプロイするコードをそろえる。
-    for (const [index, file] of [[1, 'test'], [2, 'deploy']] as const) {
+    for (const [index, file] of [[1, 'test'], [2, 'build'], [3, 'deploy']] as const) {
       const action = props.Stages[index].Actions[0];
       expect(action.ActionTypeId.Provider).toBe('CodeBuild');
       expect(action.InputArtifacts).toEqual(source.OutputArtifacts);
@@ -113,15 +113,15 @@ describe('CodePipeline と CodeBuild のデプロイ基盤', () => {
     template.resourceCountIs('AWS::SSM::Parameter', 0);
   });
 
-  test('3つのビルドは ARM・SMALL を使い、ログは1週間で消す', () => {
-    template.resourceCountIs('AWS::CodeBuild::Project', 3);
-    template.resourceCountIs('AWS::Logs::LogGroup', 3);
-    for (const file of ['test', 'deploy', 'destroy']) {
+  test('4つのビルドは ARM・SMALL を使い、ログは1週間で消す', () => {
+    template.resourceCountIs('AWS::CodeBuild::Project', 4);
+    template.resourceCountIs('AWS::Logs::LogGroup', 4);
+    for (const file of ['test', 'build', 'deploy', 'destroy']) {
       const props = project(file);
       expect(props.Name).toBeUndefined();
       expect(props.Environment).toMatchObject({
         Type: 'ARM_CONTAINER', ComputeType: 'BUILD_GENERAL1_SMALL',
-        Image: 'aws/codebuild/amazonlinux-aarch64-standard:4.0', PrivilegedMode: false,
+        Image: 'aws/codebuild/amazonlinux-aarch64-standard:4.0', PrivilegedMode: file === 'build',
       });
       const logging = props.LogsConfig.CloudWatchLogs;
       expect(logging.Status).toBe('ENABLED');
@@ -131,6 +131,30 @@ describe('CodePipeline と CodeBuild のデプロイ基盤', () => {
     }
     expect(project('deploy').TimeoutInMinutes).toBe(60);
     expect(project('destroy').TimeoutInMinutes).toBe(60);
+  });
+
+  test('Build は SHA を受け取り、名前で参照するリポジトリへの確認・push だけを許可する', () => {
+    const build = pipeline('statuspage').Stages[2].Actions[0];
+    expect(build.Name).toBe('Build');
+    expect(JSON.parse(build.Configuration.EnvironmentVariables)).toEqual([
+      { name: 'APP_VERSION', value: '#{SourceVariables.CommitId}', type: 'PLAINTEXT' },
+    ]);
+    expect(project('build').Environment.EnvironmentVariables).toEqual([{
+      Name: 'REPOSITORY_URI', Type: 'PLAINTEXT',
+      Value: stack.resolve(`${stack.account}.dkr.ecr.ap-southeast-2.${stack.urlSuffix}/statuspage`),
+    }]);
+    const added = statements('build').filter(statement =>
+      ![statement.Action].flat().every((action: string) => /^(logs|s3):/.test(action)));
+    expect(added).toEqual([{
+      Effect: 'Allow', Action: 'ecr:GetAuthorizationToken', Resource: '*',
+    }, {
+      Effect: 'Allow',
+      Action: [
+        'ecr:BatchCheckLayerAvailability', 'ecr:BatchGetImage', 'ecr:DescribeImages',
+        'ecr:InitiateLayerUpload', 'ecr:UploadLayerPart', 'ecr:CompleteLayerUpload', 'ecr:PutImage',
+      ].sort(),
+      Resource: stack.resolve(stack.formatArn({ service: 'ecr', resource: 'repository', resourceName: 'statuspage' })),
+    }]);
   });
 
   test('ビルドの追加権限は deploy の3文と destroy のロール引き受けだけ', () => {

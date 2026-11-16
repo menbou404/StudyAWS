@@ -6,6 +6,7 @@ import { NetworkStack } from '../lib/network-stack';
 import { parseAllowedCidrs } from '../lib/allowed-cidrs';
 import { parseAppVersion } from '../lib/app-version';
 import { PipelineStack } from '../lib/pipeline-stack';
+import { RegistryStack } from '../lib/registry-stack';
 
 const app = new App();
 const env = {
@@ -24,6 +25,8 @@ const database = new DatabaseStack(app, 'StatuspageDatabase', {
   vpc: network.vpc,
   dbSecurityGroup: network.dbSecurityGroup,
 });
+// Phase 7 手順2：イメージは毎日消さず、App・Pipeline からは名前だけで参照する。
+new RegistryStack(app, 'StatuspageRegistry', { env });
 new AppStack(app, 'StatuspageApp', {
   env,
   vpc: network.vpc,

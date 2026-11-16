@@ -1,11 +1,12 @@
 import { readFileSync } from 'node:fs';
 import * as path from 'node:path';
-import { App, Environment } from 'aws-cdk-lib';
+import { App, ArnFormat, Environment } from 'aws-cdk-lib';
 import { Match, Template } from 'aws-cdk-lib/assertions';
 import { AppStack } from '../lib/app-stack';
 import { DatabaseStack } from '../lib/database-stack';
 import { NetworkStack } from '../lib/network-stack';
 import { PipelineStack } from '../lib/pipeline-stack';
+import { RegistryStack } from '../lib/registry-stack';
 
 const config = JSON.parse(readFileSync(path.join(__dirname, '../cdk.json'), 'utf8'));
 const allowedCidrs = ['203.0.113.10/32', '198.51.100.20/32'];
@@ -28,8 +29,9 @@ function createStacks(cidrs: string[] = [], env: Environment = { region: 'ap-sou
     allowedCidrs: cidrs,
     appVersion,
   });
+  const registry = new RegistryStack(app, 'StatuspageRegistry', { env });
   const pipeline = new PipelineStack(app, 'StatuspagePipeline', { env, githubRepo: 'owner/repo' });
-  return { app, network, database, application, pipeline };
+  return { app, network, database, application, registry, pipeline };
 }
 
 function singleResource(template: Template, type: string, properties: Record<string, unknown>) {
@@ -58,20 +60,14 @@ function ingressRules(template: Template) {
   return [...inline, ...standalone];
 }
 
-function userDataScript(userData: { 'Fn::Base64': string }): string {
-  // UserData.custom が元スクリプト以外の命令を暗黙に足していないことも確認する。
-  expect(typeof userData['Fn::Base64']).toBe('string');
-  return userData['Fn::Base64'];
-}
-
-describe('Phase 5・6 のスタック', () => {
+describe('Phase 5〜7 のスタック', () => {
   const stacks = createStacks(allowedCidrs);
   const assembly = stacks.app.synth();
   const network = Template.fromStack(stacks.network);
   const database = Template.fromStack(stacks.database);
   const application = Template.fromStack(stacks.application);
 
-  test('アカウントが決まった4スタックもキャッシュなしでコンテキストを問い合わせない', () => {
+  test('アカウントが決まった5スタックもキャッシュなしでコンテキストを問い合わせない', () => {
     // App は cdk.context.json を直接読まないが、CLI 経由のキャッシュでも不具合を隠さない。
     const environment = jest.replaceProperty(process, 'env', {
       ...process.env,
@@ -85,7 +81,7 @@ describe('Phase 5・6 のスタック', () => {
         region: 'ap-southeast-2',
       });
       const concreteAssembly = concreteStacks.app.synth();
-      expect(concreteAssembly.stacks).toHaveLength(4);
+      expect(concreteAssembly.stacks).toHaveLength(5);
       expect(concreteAssembly.manifest.missing ?? []).toEqual([]);
     } finally {
       environment.restore();
@@ -186,15 +182,15 @@ describe('Phase 5・6 のスタック', () => {
     }
   });
 
-  test('web は ALB の SG からの TCP 80 だけ、web と worker の外向き通信は許可する', () => {
+  test('web は ALB の SG からの TCP 8000 だけ、web と worker の外向き通信は許可する', () => {
     const alb = group(application, 'statuspage alb');
     const web = group(application, 'statuspage web');
     expect(ingressRules(application).filter(rule => JSON.stringify(rule.GroupId) === JSON.stringify(groupId(web.id)))).toEqual([{
       GroupId: groupId(web.id),
       SourceSecurityGroupId: groupId(alb.id),
       IpProtocol: 'tcp',
-      FromPort: 80,
-      ToPort: 80,
+      FromPort: 8000,
+      ToPort: 8000,
       Description: 'from alb',
     }]);
     for (const description of ['statuspage web', 'statuspage worker']) {
@@ -223,12 +219,16 @@ describe('Phase 5・6 のスタック', () => {
     expect(ingressRules(application).filter(rule => rule.FromPort === 5432)).toEqual(rules);
   });
 
-  test('依存関係は App → Database・Network、Database → Network のみで Pipeline は独立する', () => {
+  test('依存関係は App → Database・Network、Database → Network のみで Registry と Pipeline は独立する', () => {
     expect(stacks.network.dependencies).toEqual([]);
     expect(stacks.database.dependencies).toEqual([stacks.network]);
     expect(stacks.application.dependencies).toEqual(expect.arrayContaining([stacks.network, stacks.database]));
     expect(stacks.application.dependencies).toHaveLength(2);
+    expect(stacks.registry.dependencies).toEqual([]);
     expect(stacks.pipeline.dependencies).toEqual([]);
+    for (const stack of [stacks.registry, stacks.pipeline]) {
+      expect(JSON.stringify(Template.fromStack(stack).toJSON())).not.toContain('Fn::ImportValue');
+    }
     const pipelineArtifact = assembly.getStackArtifact(stacks.pipeline.artifactId);
     expect(pipelineArtifact.dependencies.filter(dependency => dependency.manifest.type === 'aws:cloudformation:stack')).toEqual([]);
     for (const stack of assembly.stacks) {
@@ -243,8 +243,8 @@ describe('Phase 5・6 のスタック', () => {
     application.resourceCountIs('AWS::ElasticLoadBalancingV2::TargetGroup', 1);
     application.hasResourceProperties('AWS::ElasticLoadBalancingV2::TargetGroup', {
       Protocol: 'HTTP',
-      Port: 80,
-      TargetType: 'instance',
+      Port: 8000,
+      TargetType: 'ip',
       HealthCheckPath: '/healthz',
       HealthCheckIntervalSeconds: 10,
       HealthCheckTimeoutSeconds: 5,
@@ -274,122 +274,159 @@ describe('Phase 5・6 のスタック', () => {
     application.hasOutput('AlbDnsName', { Value: { 'Fn::GetAtt': [alb.id, 'DNSName'] } });
   });
 
-  test('api は希望2・最小2・最大4で ELB チェック、worker は1台でターゲット登録なし', () => {
-    application.resourceCountIs('AWS::AutoScaling::AutoScalingGroup', 2);
-    const apiTemplate = singleResource(application, 'AWS::EC2::LaunchTemplate', { LaunchTemplateData: Match.objectLike({
-      SecurityGroupIds: [groupId(group(application, 'statuspage web').id)],
-    }) });
-    const workerTemplate = singleResource(application, 'AWS::EC2::LaunchTemplate', { LaunchTemplateData: Match.objectLike({
-      SecurityGroupIds: [groupId(group(application, 'statuspage worker').id)],
-    }) });
+  test('App は ASG・起動テンプレート・NAT を作らず、Container Insights を無効にする', () => {
+    for (const type of ['AWS::AutoScaling::AutoScalingGroup', 'AWS::EC2::LaunchTemplate', 'AWS::EC2::NatGateway']) {
+      application.resourceCountIs(type, 0);
+    }
+    application.hasResourceProperties('AWS::ECS::Cluster', {
+      ClusterSettings: [{ Name: 'containerInsights', Value: 'disabled' }],
+    });
+  });
+
+  test('タスク2つは小さい ARM Fargate で、秘密を値としてテンプレートへ残さない', () => {
+    application.resourceCountIs('AWS::ECS::TaskDefinition', 2);
+    for (const name of ['api', 'worker']) {
+      const task = singleResource(application, 'AWS::ECS::TaskDefinition', {
+        ContainerDefinitions: Match.arrayWith([Match.objectLike({ Name: name })]),
+      }).properties;
+      expect(task).toMatchObject({
+        RequiresCompatibilities: ['FARGATE'], NetworkMode: 'awsvpc', Cpu: '256', Memory: '512',
+        RuntimePlatform: { CpuArchitecture: 'ARM64', OperatingSystemFamily: 'LINUX' },
+      });
+      expect(task.ContainerDefinitions).toHaveLength(1);
+      const container = task.ContainerDefinitions[0];
+      expect(container.Name).toBe(name);
+      const imageParts = container.Image['Fn::Join'];
+      expect(imageParts[1].at(-1)).toBe(`/statuspage:${appVersion}`);
+      expect(container.Environment).toEqual([
+        { Name: 'APP_VERSION', Value: appVersion },
+        { Name: 'DB_HOST', Value: stacks.application.resolve(stacks.database.instance.dbInstanceEndpointAddress) },
+      ]);
+      for (const forbidden of ['DB_PASSWORD', 'DATABASE_URL']) {
+        expect(container.Environment.map((entry: { Name: string }) => entry.Name)).not.toContain(forbidden);
+      }
+      expect(container.Secrets).toEqual([{
+        Name: 'DB_PASSWORD', ValueFrom: { 'Fn::GetAtt': [expect.any(String), 'ARN'] },
+      }]);
+      const lookupId = container.Secrets[0].ValueFrom['Fn::GetAtt'][0];
+      const lookup = application.findResources('Custom::AWS')[lookupId];
+      expect(JSON.parse(lookup.Properties.Create)).toMatchObject({
+        service: 'SecretsManager', action: 'describeSecret', parameters: { SecretId: 'statuspage/db-app' },
+        outputPaths: ['ARN'],
+      });
+      expect(JSON.parse(lookup.Properties.Update)).toMatchObject({ action: 'describeSecret' });
+      expect(lookup.Properties.Delete).toBeUndefined();
+      expect(container.LogConfiguration).toMatchObject({ LogDriver: 'awslogs' });
+      const logId = container.LogConfiguration.Options['awslogs-group'].Ref;
+      expect(application.findResources('AWS::Logs::LogGroup')[logId]).toBeDefined();
+      if (name === 'api') {
+        expect(container.PortMappings).toEqual([{ ContainerPort: 8000, Protocol: 'tcp' }]);
+        expect(container.Command).toBeUndefined();
+      } else {
+        expect(container.Command).toEqual(['python', '-m', 'statuspage.worker']);
+        expect(container.PortMappings).toBeUndefined();
+      }
+    }
+  });
+
+  test('api は2個を保って更新し、worker は古い1個を止めてから更新する', () => {
+    application.resourceCountIs('AWS::ECS::Service', 2);
     const target = singleResource(application, 'AWS::ElasticLoadBalancingV2::TargetGroup', {});
-    const publicSubnets = stacks.network.vpc.publicSubnets.map(subnet => stacks.application.resolve(subnet.subnetId));
-    application.hasResourceProperties('AWS::AutoScaling::AutoScalingGroup', {
-      MinSize: '2', MaxSize: '4', DesiredCapacity: '2',
-      HealthCheckType: 'ELB', HealthCheckGracePeriod: 300,
-      TargetGroupARNs: [{ Ref: target.id }],
-      LaunchTemplate: Match.objectLike({ LaunchTemplateId: { Ref: apiTemplate.id } }),
-      VPCZoneIdentifier: publicSubnets,
-    });
-    application.hasResourceProperties('AWS::AutoScaling::AutoScalingGroup', {
-      MinSize: '1', MaxSize: '1', DesiredCapacity: '1',
-      HealthCheckType: 'EC2',
-      TargetGroupARNs: Match.absent(),
-      LoadBalancerNames: Match.absent(),
-      LaunchTemplate: Match.objectLike({ LaunchTemplateId: { Ref: workerTemplate.id } }),
-      VPCZoneIdentifier: publicSubnets,
-    });
+    for (const [name, desired, minimum, maximum, sg] of [
+      ['api', 2, 100, 200, 'web'], ['worker', 1, 0, 100, 'worker'],
+    ] as const) {
+      const task = singleResource(application, 'AWS::ECS::TaskDefinition', {
+        ContainerDefinitions: Match.arrayWith([Match.objectLike({ Name: name })]),
+      });
+      const service = singleResource(application, 'AWS::ECS::Service', { TaskDefinition: { Ref: task.id } }).properties;
+      expect(service).toMatchObject({
+        LaunchType: 'FARGATE', DesiredCount: desired,
+        EnableExecuteCommand: false,
+        DeploymentConfiguration: {
+          MinimumHealthyPercent: minimum, MaximumPercent: maximum,
+          DeploymentCircuitBreaker: { Enable: true, Rollback: true },
+        },
+        NetworkConfiguration: { AwsvpcConfiguration: {
+          AssignPublicIp: 'ENABLED',
+          Subnets: stacks.network.vpc.publicSubnets.map(subnet => stacks.application.resolve(subnet.subnetId)),
+          SecurityGroups: [groupId(group(application, `statuspage ${sg}`).id)],
+        } },
+      });
+      if (name === 'api') {
+        expect(service.HealthCheckGracePeriodSeconds).toBe(60);
+        expect(service.LoadBalancers).toEqual([{
+          ContainerName: 'api', ContainerPort: 8000, TargetGroupArn: { Ref: target.id },
+        }]);
+      } else {
+        expect(service.LoadBalancers ?? []).toEqual([]);
+        expect(service.HealthCheckGracePeriodSeconds).toBeUndefined();
+      }
+    }
   });
 
-  test('EC2 ロールは SSM・アプリ用シークレット・指定 DB と自スタックへの起動通知だけを持つ', () => {
-    application.resourceCountIs('AWS::IAM::Role', 1);
-    application.hasResourceProperties('AWS::IAM::Role', {
-      AssumeRolePolicyDocument: Match.objectLike({ Statement: [{
-        Effect: 'Allow', Action: 'sts:AssumeRole', Principal: { Service: 'ec2.amazonaws.com' },
-      }] }),
-    });
-    const role = singleResource(application, 'AWS::IAM::Role', {});
-    expect(role.properties.ManagedPolicyArns).toHaveLength(1);
-    expect(JSON.stringify(role.properties.ManagedPolicyArns)).toContain('policy/AmazonSSMManagedInstanceCore');
+  test('秘密を読むのは実行ロールだけで、タスクロールは無権限に保つ', () => {
     application.resourceCountIs('AWS::SecretsManager::Secret', 0);
+    const roles = application.findResources('AWS::IAM::Role');
     const policies = Object.values(application.findResources('AWS::IAM::Policy'));
-    const statements = policies.flatMap(policy => policy.Properties.PolicyDocument.Statement);
-    const secret = statements.find(statement => [statement.Action].flat().includes('secretsmanager:GetSecretValue'));
-    expect(secret).toBeDefined();
-    expect(JSON.stringify(secret.Resource)).toContain('statuspage/db-app');
-    const rds = statements.find(statement => [statement.Action].flat().includes('rds:DescribeDBInstances'));
-    expect(rds).toBeDefined();
-    expect(rds.Resource).toEqual(stacks.application.resolve(stacks.database.instance.instanceArn));
-    const signal = statements.find(statement => [statement.Action].flat().includes('cloudformation:SignalResource'));
-    expect(signal).toEqual({
-      Effect: 'Allow', Action: 'cloudformation:SignalResource',
-      // signals が自動追加する StackId も、自分のスタックだけを指すことを確認する。
-      Resource: [stacks.application.resolve(stacks.application.formatArn({
-        service: 'cloudformation', resource: 'stack', resourceName: 'StatuspageApp/*',
-      })), { Ref: 'AWS::StackId' }],
-    });
-    for (const statement of statements) {
-      expect([statement.Resource].flat()).not.toContain('*');
-      expect([statement.Action].flat()).not.toContain('*');
-      expect(statement.Effect).toBe('Allow');
+    const policiesFor = (id: string) => policies.filter(policy =>
+      policy.Properties.Roles?.some((role: { Ref: string }) => role.Ref === id));
+    const secretArn = stacks.application.resolve(stacks.application.formatArn({
+      service: 'secretsmanager', resource: 'secret', resourceName: 'statuspage/db-app-??????',
+      arnFormat: ArnFormat.COLON_RESOURCE_NAME,
+    }));
+    const executionIds: string[] = [];
+    for (const task of Object.values(application.findResources('AWS::ECS::TaskDefinition'))) {
+      const taskRoleId = task.Properties.TaskRoleArn['Fn::GetAtt'][0];
+      expect(roles[taskRoleId].Properties.ManagedPolicyArns).toBeUndefined();
+      expect(roles[taskRoleId].Properties.Policies).toBeUndefined();
+      expect(policiesFor(taskRoleId)).toEqual([]);
+      const executionId = task.Properties.ExecutionRoleArn['Fn::GetAtt'][0];
+      executionIds.push(executionId);
+      const secretStatements = policiesFor(executionId).flatMap(policy => policy.Properties.PolicyDocument.Statement)
+        .filter(statement => [statement.Action].flat().some((action: string) => action.startsWith('secretsmanager:')));
+      expect(secretStatements).toEqual([{
+        Effect: 'Allow', Action: 'secretsmanager:GetSecretValue', Resource: secretArn,
+      }]);
     }
-    expect(statements).toHaveLength(3);
+    expect(new Set(executionIds).size).toBe(2);
+    for (const policy of policies) {
+      for (const statement of policy.Properties.PolicyDocument.Statement) {
+        if ([statement.Action].flat().includes('secretsmanager:GetSecretValue')) {
+          expect(policy.Properties.Roles.every((role: { Ref: string }) => executionIds.includes(role.Ref))).toBe(true);
+        }
+        if ([statement.Action].flat().includes('secretsmanager:DescribeSecret')) {
+          expect(statement.Resource).toEqual(secretArn);
+        }
+      }
+    }
   });
 
-  test.each([
-    ['2', 2, 2],
-    ['1', 0, 1],
-  ])('希望台数 %s の ASG は起動通知を10分待ち、1台ずつローリング更新する', (desired, minimum, count) => {
-    application.hasResource('AWS::AutoScaling::AutoScalingGroup', {
-      Properties: Match.objectLike({ DesiredCapacity: desired }),
-      CreationPolicy: {
-        ResourceSignal: { Count: count, Timeout: 'PT10M' },
+  test('ロググループ2つは1週間保存し、App と一緒に消す', () => {
+    application.resourceCountIs('AWS::Logs::LogGroup', 2);
+    for (const log of Object.values(application.findResources('AWS::Logs::LogGroup'))) {
+      expect(log).toMatchObject({
+        Properties: { RetentionInDays: 7 }, DeletionPolicy: 'Delete', UpdateReplacePolicy: 'Delete',
+      });
+    }
+  });
+
+  test('Registry は不変タグとスキャンを使い、最新10個だけ残して削除時には空にする', () => {
+    const registry = Template.fromStack(stacks.registry);
+    registry.resourceCountIs('AWS::ECR::Repository', 1);
+    const repository = Object.values(registry.findResources('AWS::ECR::Repository'))[0];
+    expect(repository).toMatchObject({
+      Properties: {
+        RepositoryName: 'statuspage', ImageTagMutability: 'IMMUTABLE',
+        ImageScanningConfiguration: { ScanOnPush: true }, EmptyOnDelete: true,
       },
-      UpdatePolicy: Match.objectLike({
-        AutoScalingRollingUpdate: Match.objectLike({
-          MaxBatchSize: 1,
-          MinInstancesInService: minimum,
-          WaitOnResourceSignals: true,
-          PauseTime: 'PT10M',
-        }),
-      }),
+      DeletionPolicy: 'Delete', UpdateReplacePolicy: 'Delete',
     });
-  });
-
-  test('起動テンプレートは Arm・IMDSv2・指定 SHA を使い、ROLE と通知先 ASG だけが異なる', () => {
-    application.resourceCountIs('AWS::EC2::LaunchTemplate', 2);
-    const source = readFileSync(path.join(__dirname, '../../deploy/ec2/user-data.sh'), 'utf8');
-    const resourceIds: string[] = [];
-    for (const [role, description] of [['api', 'statuspage web'], ['worker', 'statuspage worker']] as const) {
-      const template = singleResource(application, 'AWS::EC2::LaunchTemplate', { LaunchTemplateData: Match.objectLike({
-        SecurityGroupIds: [groupId(group(application, description).id)],
-      }) });
-      expect(template.properties.LaunchTemplateData).toMatchObject({
-        InstanceType: 't4g.micro', MetadataOptions: { HttpTokens: 'required' },
-      });
-      expect(template.properties.LaunchTemplateData.KeyName).toBeUndefined();
-      const script = userDataScript(template.properties.LaunchTemplateData.UserData);
-      const asg = singleResource(application, 'AWS::AutoScaling::AutoScalingGroup', {
-        LaunchTemplate: Match.objectLike({ LaunchTemplateId: { Ref: template.id } }),
-      });
-      resourceIds.push(asg.id);
-      expect(script).toContain(`ROLE="${role}"`);
-      expect(script).not.toContain(`ROLE="${role === 'api' ? 'worker' : 'api'}"`);
-      expect(script).toContain(`APP_VERSION="${appVersion}"`);
-      expect(script).not.toContain('APP_VERSION="main"');
-      expect(script).toContain('CFN_STACK="StatuspageApp"');
-      expect(script).toContain(`CFN_RESOURCE="${asg.id}"`);
-      expect(script).toBe(source
-        .replace('ROLE="api"', `ROLE="${role}"`)
-        .replace('APP_VERSION="main"', `APP_VERSION="${appVersion}"`)
-        .replace('CFN_STACK=""', 'CFN_STACK="StatuspageApp"')
-        .replace('CFN_RESOURCE=""', `CFN_RESOURCE="${asg.id}"`));
-    }
-    expect(new Set(resourceIds).size).toBe(2);
-    const parameters = Object.values(application.toJSON().Parameters) as { Type: string; Default?: string }[];
-    expect(parameters).toEqual(expect.arrayContaining([expect.objectContaining({
-      Type: 'AWS::SSM::Parameter::Value<AWS::EC2::Image::Id>',
-      Default: '/aws/service/ami-amazon-linux-latest/al2023-ami-kernel-default-arm64',
-    })]));
+    expect(JSON.parse(repository.Properties.LifecyclePolicy.LifecyclePolicyText)).toEqual({
+      rules: [{
+        rulePriority: 1,
+        selection: { tagStatus: 'any', countType: 'imageCountMoreThan', countNumber: 10 },
+        action: { type: 'expire' },
+      }],
+    });
   });
 });

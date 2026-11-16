@@ -1,0 +1,33 @@
+version: 0.2
+
+env:
+  shell: bash
+
+phases:
+  build:
+    commands:
+      # スキップも含めて1項目にし、既存タグを上書きしようとする後続処理を防ぐ。
+      - |
+        set -euo pipefail
+        # main や短い SHA では作らず、デプロイと同じコミットに固定する。
+        if [[ ! "${APP_VERSION:-}" =~ ^[0-9a-f]{40}$ ]]; then
+          printf 'APP_VERSION は40文字の小文字16進数で指定してください\n' >&2
+          exit 1
+        fi
+        # 一時的なパスワードは画面に出さず、Docker の標準入力へ渡す。
+        aws ecr get-login-password --region "$AWS_REGION" | docker login --username AWS --password-stdin "${REPOSITORY_URI%%/*}"
+        error_file=$(mktemp)
+        trap 'rm -f "$error_file"' EXIT
+        # ImageNotFoundException だけを不在と扱い、権限不足や通信の失敗は見逃さない。
+        # exit 0 で途中終了させず、deploy.yml と同じく分岐の中だけで処理を分ける。
+        if aws ecr describe-images --repository-name statuspage --image-ids imageTag="$APP_VERSION" > /dev/null 2> "$error_file"; then
+          printf '既にあるのでビルドしない: %s\n' "$APP_VERSION"
+        elif grep -Fq '(ImageNotFoundException)' "$error_file"; then
+          # ARM のイメージを1回だけ作り、後続の Deploy でも同じ SHA のタグを使う。
+          docker build --platform linux/arm64 -t "$REPOSITORY_URI:$APP_VERSION" "$CODEBUILD_SRC_DIR/app"
+          docker push "$REPOSITORY_URI:$APP_VERSION"
+        else
+          printf 'ECR イメージの確認に失敗しました\n' >&2
+          cat "$error_file" >&2
+          exit 1
+        fi
