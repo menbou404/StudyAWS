@@ -472,7 +472,7 @@ git branch -D try-branch
 - 手元から `cdk deploy` するときは、`-c appVersion=$(git rev-parse HEAD)` を付ける（付けないと `main` になり、パイプラインが入れたバージョンと違うので、インスタンスが入れ替わる）。手元のコミットは、先に push しておく（インスタンスは GitHub からコードを取ってくる）
 - 1週間以上空けるときは、RDS を停止したままにしない（7日で自動で起動する）
 
-- [ ] 理解した
+- [x] 理解した
 
 ## 13. Phase 6 の片付け
 
@@ -488,5 +488,5 @@ Phase 7 でも、ここまでのスタックとパイプラインを使う。手
 
 - `StatuspagePipeline`、接続、パラメータストアの値は残す
 
-- [ ] `StatuspageApp` を削除
-- [ ] RDS を停止
+- [x] `StatuspageApp` を削除
+- [x] RDS を停止
