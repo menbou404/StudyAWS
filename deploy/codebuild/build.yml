@@ -24,7 +24,8 @@ phases:
           printf '既にあるのでビルドしない: %s\n' "$APP_VERSION"
         elif grep -Fq '(ImageNotFoundException)' "$error_file"; then
           # ARM のイメージを1回だけ作り、後続の Deploy でも同じ SHA のタグを使う。
-          docker build --platform linux/arm64 -t "$REPOSITORY_URI:$APP_VERSION" "$CODEBUILD_SRC_DIR/app"
+          # 来歴の証明書を束ねると同じタグで2回 push され、不変タグに弾かれるため付けない。
+          docker build --platform linux/arm64 --provenance=false -t "$REPOSITORY_URI:$APP_VERSION" "$CODEBUILD_SRC_DIR/app"
           docker push "$REPOSITORY_URI:$APP_VERSION"
         else
           printf 'ECR イメージの確認に失敗しました\n' >&2

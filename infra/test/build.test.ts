@@ -79,7 +79,7 @@ describe('CodeBuild のイメージ作成手順', () => {
     const result = runBuild(appVersion, 'An error occurred (ImageNotFoundException) when calling the DescribeImages operation', 0, 254);
     expect(result.status).toBe(0);
     const tag = `123456789012.dkr.ecr.ap-southeast-2.amazonaws.com/statuspage:${appVersion}`;
-    expect(result.commands).toContain(`docker build --platform linux/arm64 -t ${tag} ${result.directory}/app\ndocker push ${tag}\n`);
+    expect(result.commands).toContain(`docker build --platform linux/arm64 --provenance=false -t ${tag} ${result.directory}/app\ndocker push ${tag}\n`);
   });
 
   test.each(['An error occurred (AccessDeniedException)', 'Could not connect to the endpoint URL', ''])

@@ -101,10 +101,11 @@ docker compose down
 2. ARM 用のイメージを作り、アーキテクチャを確かめる
 
 ```bash
-docker build --platform linux/arm64 -t statuspage:local app
+docker build --platform linux/arm64 --provenance=false -t statuspage:local app
 docker image inspect statuspage:local --format "{{.Architecture}}"
 ```
 
+- `--provenance=false` は「来歴の証明書（provenance attestation）を付けない」という指定。Docker Desktop は既定で、イメージ本体と証明書を束ねた形で作る。そのまま push すると、同じタグで2つを送ろうとして、手順2の上書き禁止（Immutable）に弾かれる（400 Bad Request）
 - `--platform linux/arm64` は「ARM の Linux で動くイメージを作る」という指定。Apple シリコンの Mac ではそのまま作れる。Intel・AMD の PC では Docker がエミュレーションで作るので、数分かかる
 - イメージの大きさは `docker image ls statuspage` で見られる
 
@@ -152,7 +153,7 @@ docker push "$registry/statuspage-manual:$tag"
 ```
 
 4. コンソールでリポジトリを開き、タグがコミット SHA のイメージがあること、スキャンの結果を見る
-5. もう一度同じ `docker push` をする。次に、別のイメージに同じタグを付けて push してみる（例：`docker build --platform linux/arm64 --no-cache -t statuspage:local app` で作り直してから、手順3の `docker tag` と `docker push`）
+5. もう一度同じ `docker push` をする。次に、別のイメージに同じタグを付けて push してみる（例：`docker build --platform linux/arm64 --provenance=false --no-cache -t statuspage:local app` で作り直してから、手順3の `docker tag` と `docker push`）
 
 - イメージの URI（`<アカウントID>.dkr.ecr.ap-southeast-2.amazonaws.com/statuspage-manual:<SHA>`）は手順3で使う。アカウントID が入るので、チャットやリポジトリには貼らない
 - `aws ecr get-login-password` は、12時間有効な一時的なパスワードを出す。それを `docker login` に渡している（画面には表示しない）
