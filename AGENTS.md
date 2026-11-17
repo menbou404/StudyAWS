@@ -88,7 +88,7 @@ docker compose up --build   # リポジトリ直下で、3つのコンテナを�
 - ベースイメージは ECR Public（`public.ecr.aws/docker/library/python`）から取る（Docker Hub の取得回数の制限を避ける）。`CMD` は exec 形式のまま、uvicorn に `--timeout-keep-alive 65` を付ける（ALB のアイドルタイムアウト60秒より長くし、502 を避ける）
 - アプリは応答に `X-Served-By`（ホスト名）を付ける。EC2 の nginx は `proxy_hide_header` でアプリの値を隠し、自分の `$hostname` だけを返す
 - DB の接続先は、`DATABASE_URL` があればそれを使う。なければ `DB_HOST`・`DB_PORT`（既定 5432）・`DB_NAME`（既定 statuspage）・`DB_USER`（既定 statuspage）・`DB_PASSWORD`・`DB_SSLMODE`（既定 require）から SQLAlchemy の `URL.create` で組み立てる（パスワードを文字列の連結で URL に入れない）。`DB_HOST` もなければ SQLite
-- ECR のリポジトリ `statuspage` は `StatuspageRegistry` に置く（物理名を付ける：パイプラインと App が名前で探す）。タグは不変（IMMUTABLE）、プッシュ時スキャン、ライフサイクルで新しい10個だけ残す。スタックを消したらイメージも消す（`emptyOnDelete`）
+- ECR のリポジトリ `statuspage` は `StatuspageRegistry` に置く（物理名を付ける：パイプラインと App が名前で探す）。タグは不変（IMMUTABLE）、ライフサイクルで新しい10個だけ残す。プッシュ時スキャンはリポジトリごとに設定しない（非推奨）。レジストリ全体のルール（フィルター `statuspage*`、手作業で設定済み）に任せる。スタックを消したらイメージも消す（`emptyOnDelete`）
 - イメージのタグはコミット SHA（`appVersion`）。`main` は synth とテストのためだけに受け付ける（そのタグのイメージは作らない）
 - Fargate の Linux / ARM64、タスクは 0.25 vCPU・512 MiB。パブリックサブネットに置き、パブリック IP を付ける（NAT ゲートウェイを作らない）。ALB のターゲットは IP、ポート 8000、ヘルスチェックは `/healthz`
 - api：希望数 2、minimumHealthyPercent 100・maximumPercent 200。worker：希望数 1、0・100（二重実行を避ける）。どちらもデプロイのサーキットブレーカー（rollback あり）。api のヘルスチェックの猶予は60秒、登録解除の遅延は30秒

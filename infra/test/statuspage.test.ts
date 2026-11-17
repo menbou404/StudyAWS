@@ -410,17 +410,19 @@ describe('Phase 5〜7 のスタック', () => {
     }
   });
 
-  test('Registry は不変タグとスキャンを使い、最新10個だけ残して削除時には空にする', () => {
+  test('Registry は不変タグを使い、最新10個だけ残して削除時には空にする', () => {
     const registry = Template.fromStack(stacks.registry);
     registry.resourceCountIs('AWS::ECR::Repository', 1);
     const repository = Object.values(registry.findResources('AWS::ECR::Repository'))[0];
     expect(repository).toMatchObject({
       Properties: {
         RepositoryName: 'statuspage', ImageTagMutability: 'IMMUTABLE',
-        ImageScanningConfiguration: { ScanOnPush: true }, EmptyOnDelete: true,
+        EmptyOnDelete: true,
       },
       DeletionPolicy: 'Delete', UpdateReplacePolicy: 'Delete',
     });
+    // リポジトリごとのプッシュ時スキャンは非推奨。レジストリ全体のルールで行う。
+    expect(repository.Properties.ImageScanningConfiguration).toBeUndefined();
     expect(JSON.parse(repository.Properties.LifecyclePolicy.LifecyclePolicyText)).toEqual({
       rules: [{
         rulePriority: 1,

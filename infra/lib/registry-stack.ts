@@ -10,7 +10,7 @@ export class RegistryStack extends Stack {
     new ecr.Repository(this, 'Repository', {
       repositoryName: 'statuspage',
       imageTagMutability: ecr.TagMutability.IMMUTABLE,
-      imageScanOnPush: true,
+      // プッシュ時スキャンはリポジトリごとの設定が非推奨のため、レジストリ全体のルール（手順2で手作業）に任せる。
       lifecycleRules: [{ maxImageCount: 10 }],
       removalPolicy: RemovalPolicy.DESTROY,
       emptyOnDelete: true,
